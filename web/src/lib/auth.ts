@@ -2,11 +2,27 @@ import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "./prisma";
 import crypto from "crypto";
+import bcrypt from "bcryptjs";
 
 // Force reload: 2025-12-25
 // Helper to verify passwords using native crypto
+// Helper to verify passwords supporting both new pbkdf2 and legacy bcrypt
 function verifyPassword(password: string, hash: string) {
-    const [salt, key] = hash.split(":");
+    // Check if it's a legacy bcrypt hash
+    if (hash.startsWith("$2y$") || hash.startsWith("$2a$") || hash.startsWith("$2b$")) {
+        try {
+            return bcrypt.compareSync(password, hash);
+        } catch (e) {
+            console.error("[AUTH] Bcrypt verification failed:", e);
+            return false;
+        }
+    }
+
+    // New pbkdf2 format: salt:hash
+    const parts = hash.split(":");
+    if (parts.length !== 2) return false;
+
+    const [salt, key] = parts;
     const derivedKey = crypto.pbkdf2Sync(password, salt, 1000, 64, "sha512").toString("hex");
     return key === derivedKey;
 }
