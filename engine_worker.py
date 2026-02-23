@@ -74,11 +74,31 @@ print("✅ Tables verified")
 # ==============================
 
 def load_watchlist():
+    tickers = set()
+    # 1. From CSV (Legacy)
     try:
-        df = pd.read_csv("Watchlist_New.csv")
-        return df["Ticker"].dropna().str.upper().unique().tolist()
+        if os.path.exists("Watchlist_New.csv"):
+            df = pd.read_csv("Watchlist_New.csv")
+            csv_tickers = df["Ticker"].dropna().str.upper().unique().tolist()
+            tickers.update(csv_tickers)
     except Exception as e:
-        print("Watchlist load error:", e)
+        print("CSV load error:", e)
+
+    # 2. From DB (Primary)
+    try:
+        cur.execute('SELECT ticker FROM "Watchlist"')
+        db_rows = cur.fetchall()
+        tickers.update([r[0].upper() for r in db_rows])
+    except Exception as e:
+        print("DB Watchlist load error:", e)
+        
+    return list(tickers)
+
+def get_common_tickers():
+    try:
+        cur.execute('SELECT ticker FROM "Watchlist" WHERE category = \'Common\'')
+        return [r[0].upper() for r in cur.fetchall()]
+    except:
         return []
 
 # ==============================
@@ -229,18 +249,22 @@ def calculate_momentum():
     # Clear old movers
     cur.execute('DELETE FROM "MarketMover"')
 
+    common_tickers = get_common_tickers()
+
     for mtype, ticker, price, change in movers:
+        is_common = 1 if ticker.upper() in common_tickers else 0
         cur.execute("""
             INSERT INTO "MarketMover"
-            (type, ticker, price, "changePercent", session, "updatedAt")
-            VALUES (%s, %s, %s, %s, %s, %s)
+            (type, ticker, price, "changePercent", session, "updatedAt", "commonFlag")
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (
             mtype,
             ticker,
             price,
             change,
             get_session(),
-            now
+            now,
+            is_common
         ))
 
     print(f"Inserted {len(movers)} movers")

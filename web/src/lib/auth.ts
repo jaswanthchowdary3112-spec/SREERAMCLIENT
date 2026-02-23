@@ -7,18 +7,19 @@ import bcrypt from "bcryptjs";
 // Force reload: 2025-12-25
 // Helper to verify passwords using native crypto
 // Helper to verify passwords supporting both new pbkdf2 and legacy bcrypt
+// Helper to verify passwords supporting both new bcrypt and legacy pbkdf2
 function verifyPassword(password: string, hash: string) {
     if (!hash) {
         console.log("[AUTH] No hash provided for verification");
         return false;
     }
 
-    // Check if it's a legacy bcrypt hash
+    // 1. Check if it's a bcrypt hash (standard for new/legacy bcrypt accounts)
     if (hash.startsWith("$2y$") || hash.startsWith("$2a$") || hash.startsWith("$2b$")) {
-        console.log("[AUTH] Verifying legacy bcrypt hash");
         try {
-            const match = bcrypt.compareSync(password, hash);
-            console.log(`[AUTH] Bcrypt match: ${match}`);
+            const trimmedPw = password.trim();
+            const match = bcrypt.compareSync(trimmedPw, hash);
+            console.log(`[AUTH] Bcrypt match attempt: ${match}`);
             return match;
         } catch (e) {
             console.error("[AUTH] Bcrypt verification error:", e);
@@ -26,23 +27,25 @@ function verifyPassword(password: string, hash: string) {
         }
     }
 
-    // New pbkdf2 format: salt:hash
+    // 2. Check if it's the temporary pbkdf2 format: salt:hash
     const parts = hash.split(":");
-    if (parts.length !== 2) {
-        console.log(`[AUTH] Invalid hash format. Parts count: ${parts.length}`);
-        return false;
+    if (parts.length === 2) {
+        console.log("[AUTH] Verifying as temporary pbkdf2 format");
+        const [salt, key] = parts;
+        try {
+            const trimmedPw = password.trim();
+            const derivedKey = crypto.pbkdf2Sync(trimmedPw, salt, 1000, 64, "sha512").toString("hex");
+            const match = key === derivedKey;
+            console.log(`[AUTH] PBKDF2 match: ${match}`);
+            return match;
+        } catch (e) {
+            console.error("[AUTH] PBKDF2 verification error:", e);
+            return false;
+        }
     }
 
-    const [salt, key] = parts;
-    try {
-        const derivedKey = crypto.pbkdf2Sync(password, salt, 1000, 64, "sha512").toString("hex");
-        const match = key === derivedKey;
-        console.log(`[AUTH] PBKDF2 match: ${match}`);
-        return match;
-    } catch (e) {
-        console.error("[AUTH] PBKDF2 verification error:", e);
-        return false;
-    }
+    console.log(`[AUTH] Unknown hash format: ${hash.substring(0, 5)}...`);
+    return false;
 }
 
 import GoogleProvider from "next-auth/providers/google";
@@ -100,10 +103,8 @@ export const authOptions: NextAuthOptions = {
 
                     if (!isPasswordValid) {
                         console.log(`[AUTH] Invalid password for: ${normalizedEmail}`);
-                        // Determine if it was bcrypt or pbkdf2 that failed
-                        const hashType = user.password.startsWith("$2") ? "bcrypt" : "pbkdf2";
-                        console.log(`[AUTH] Verification failed for hash type: ${hashType}`);
-                        return null;
+                        // Return a specific error string that NextAuth will pass to the client
+                        throw new Error("INVALID_PASSWORD");
                     }
 
                     // Defensive Role Promotion: If no owner exists, promote first user
@@ -192,4 +193,5 @@ export const authOptions: NextAuthOptions = {
         strategy: "jwt",
     },
     secret: process.env.NEXTAUTH_SECRET || "fallback-secret-for-dev-only",
+    debug: true, // Enable detailed server-side logging
 };

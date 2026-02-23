@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import fs from 'fs';
 import path from 'path';
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
 
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
@@ -116,6 +118,29 @@ export async function GET(req: Request) {
         }
 
         // -----------------------
+        // FETCH USER PORTFOLIO FROM DB
+        // -----------------------
+        let dbPortfolio: any[] = [];
+        try {
+            const session = await getServerSession(authOptions);
+            if (session?.user?.email) {
+                const user = await prisma.user.findUnique({
+                    where: { email: session.user.email },
+                    include: { portfolio: true }
+                });
+                if (user?.portfolio) {
+                    dbPortfolio = user.portfolio.map(p => ({
+                        ticker: p.ticker,
+                        avgCost: p.avgCost,
+                        shares: p.shares
+                    }));
+                }
+            }
+        } catch (e) {
+            console.error("[API Movers] Portfolio fetch failed:", e);
+        }
+
+        // -----------------------
         // FETCH LIVE QUOTES FOR ALL TICKERS
         // -----------------------
         const allTickers = Array.from(new Set([
@@ -136,15 +161,36 @@ export async function GET(req: Request) {
             }
         }
 
+        // -----------------------
+        // FETCH WATCHLIST FROM PRISMA
+        // -----------------------
+        let watchlist: any[] = []
+        try {
+            watchlist = await prisma.watchlist.findMany({
+                select: { ticker: true, category: true }
+            });
+            // Enrich with quotes
+            const watchlistTickers = watchlist.map(w => w.ticker);
+            const watchlistQuotes = await (await import('@/lib/stock-api')).getLiveQuotes(watchlistTickers);
+
+            watchlist = watchlist.map(w => ({
+                ...w,
+                ...(watchlistQuotes[w.ticker] || {})
+            }));
+        } catch (e) {
+            console.error("[API Movers] Failed to fetch watchlist:", e);
+        }
+
         return NextResponse.json({
             m1,
             m5,
             m30,
             day,
             common,
-            watchlist: [],
+            watchlist,
             quotes: quotes,
             news: [],
+            portfolio: dbPortfolio,
             movers: common, // Populate movers with common stocks for the CommonListsPage
             sessions: { preMarket: [], regular: [], postMarket: [] },
             engineStatus: {

@@ -51,12 +51,12 @@ export default function LoginPage() {
 
                 if (res?.error) {
                     console.error('Login error full response:', res.error);
-                    if (res.error === 'CredentialsSignin') {
-                        setError('Invalid email or password');
+                    if (res.error === 'CredentialsSignin' || res.error.includes('INVALID_PASSWORD')) {
+                        setError('Incorrect password. Please try again.');
                     } else if (res.error.includes('USER_NOT_FOUND')) {
-                        setError('User not found. Please create an account.');
+                        setError('Account not found. Please sign up.');
                     } else {
-                        setError(res.error || 'Server error during login');
+                        setError(`Authentication Error: ${res.error}`);
                     }
                     setLoading(false);
                 } else {

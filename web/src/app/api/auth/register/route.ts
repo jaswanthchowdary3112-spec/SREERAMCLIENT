@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import crypto from "crypto";
+import bcrypt from "bcryptjs";
 
 // Helper to hash passwords consistently with auth.ts
+// Use standard bcrypt for all new registrations
 function hashPassword(password: string) {
-    const salt = crypto.randomBytes(16).toString("hex");
-    const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, "sha512").toString("hex");
-    return `${salt}:${hash}`;
+    return bcrypt.hashSync(password, 10);
 }
 
 export async function POST(req: NextRequest) {
