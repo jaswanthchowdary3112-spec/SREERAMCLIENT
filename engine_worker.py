@@ -40,28 +40,30 @@ print("✅ Connected to PostgreSQL")
 # ==============================
 
 cur.execute("""
-CREATE TABLE IF NOT EXISTS stks (
-    cb_date TEXT,
-    cbucket INTEGER,
-    session TEXT,
-    tckr TEXT,
+CREATE TABLE IF NOT EXISTS "TickerStat" (
+    id SERIAL PRIMARY KEY,
+    ticker TEXT,
     price DOUBLE PRECISION,
-    day_open DOUBLE PRECISION,
-    prev_close DOUBLE PRECISION,
-    change_percent DOUBLE PRECISION,
-    ts TIMESTAMP
+    "dayOpen" DOUBLE PRECISION,
+    "prevClose" DOUBLE PRECISION,
+    "changePercent" DOUBLE PRECISION,
+    session TEXT,
+    "cbDate" TEXT,
+    cbucket INTEGER,
+    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """)
 
 cur.execute("""
-CREATE TABLE IF NOT EXISTS market_movers (
+CREATE TABLE IF NOT EXISTS "MarketMover" (
+    id SERIAL PRIMARY KEY,
     type TEXT,
     ticker TEXT,
     price DOUBLE PRECISION,
-    change_percent DOUBLE PRECISION,
+    "changePercent" DOUBLE PRECISION,
     session TEXT,
-    updated_at TIMESTAMP,
-    PRIMARY KEY (type, ticker)
+    "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    "commonFlag" INTEGER DEFAULT 0
 );
 """)
 
@@ -136,12 +138,11 @@ def fetch_and_store(stocks):
         execute_values(
             cur,
             """
-            INSERT INTO stks
-            (cb_date, cbucket, session, tckr, price,
-             day_open, prev_close, change_percent, ts)
+            INSERT INTO "TickerStat"
+            (ticker, price, "dayOpen", "prevClose", "changePercent", session, "cbDate", cbucket, ts)
             VALUES %s
             """,
-            rows
+            [(r[3], r[4], r[5], r[6], r[7], r[2], r[0], r[1], r[8]) for r in rows]
         )
 
         print(f"Inserted {len(rows)} snapshots")
@@ -152,7 +153,7 @@ def fetch_and_store(stocks):
 
 def rolling_cleanup():
     cutoff = datetime.utcnow() - timedelta(hours=3)
-    cur.execute("DELETE FROM stks WHERE ts < %s", (cutoff,))
+    cur.execute('DELETE FROM "TickerStat" WHERE ts < %s', (cutoff,))
     print("Cleanup complete")
 
 # ==============================
@@ -163,10 +164,10 @@ def calculate_momentum():
     print("Calculating momentum...")
 
     cur.execute("""
-        SELECT DISTINCT ON (tckr)
-        tckr, price, cbucket, day_open, prev_close
-        FROM stks
-        ORDER BY tckr, ts DESC
+        SELECT DISTINCT ON (ticker)
+        ticker, price, cbucket, "dayOpen", "prevClose"
+        FROM "TickerStat"
+        ORDER BY ticker, ts DESC
     """)
     latest_rows = cur.fetchall()
 
@@ -181,8 +182,8 @@ def calculate_momentum():
 
         def get_price_offset(offset):
             cur.execute("""
-                SELECT price FROM stks
-                WHERE tckr = %s
+                SELECT price FROM "TickerStat"
+                WHERE ticker = %s
                 AND cbucket <= %s
                 ORDER BY cbucket DESC
                 LIMIT 1
@@ -226,12 +227,12 @@ def calculate_momentum():
             movers.append(("day_dipper", ticker, price, day_change))
 
     # Clear old movers
-    cur.execute("DELETE FROM market_movers")
+    cur.execute('DELETE FROM "MarketMover"')
 
     for mtype, ticker, price, change in movers:
         cur.execute("""
-            INSERT INTO market_movers
-            (type, ticker, price, change_percent, session, updated_at)
+            INSERT INTO "MarketMover"
+            (type, ticker, price, "changePercent", session, "updatedAt")
             VALUES (%s, %s, %s, %s, %s, %s)
         """, (
             mtype,

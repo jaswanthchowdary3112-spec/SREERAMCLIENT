@@ -8,23 +8,41 @@ import bcrypt from "bcryptjs";
 // Helper to verify passwords using native crypto
 // Helper to verify passwords supporting both new pbkdf2 and legacy bcrypt
 function verifyPassword(password: string, hash: string) {
+    if (!hash) {
+        console.log("[AUTH] No hash provided for verification");
+        return false;
+    }
+
     // Check if it's a legacy bcrypt hash
     if (hash.startsWith("$2y$") || hash.startsWith("$2a$") || hash.startsWith("$2b$")) {
+        console.log("[AUTH] Verifying legacy bcrypt hash");
         try {
-            return bcrypt.compareSync(password, hash);
+            const match = bcrypt.compareSync(password, hash);
+            console.log(`[AUTH] Bcrypt match: ${match}`);
+            return match;
         } catch (e) {
-            console.error("[AUTH] Bcrypt verification failed:", e);
+            console.error("[AUTH] Bcrypt verification error:", e);
             return false;
         }
     }
 
     // New pbkdf2 format: salt:hash
     const parts = hash.split(":");
-    if (parts.length !== 2) return false;
+    if (parts.length !== 2) {
+        console.log(`[AUTH] Invalid hash format. Parts count: ${parts.length}`);
+        return false;
+    }
 
     const [salt, key] = parts;
-    const derivedKey = crypto.pbkdf2Sync(password, salt, 1000, 64, "sha512").toString("hex");
-    return key === derivedKey;
+    try {
+        const derivedKey = crypto.pbkdf2Sync(password, salt, 1000, 64, "sha512").toString("hex");
+        const match = key === derivedKey;
+        console.log(`[AUTH] PBKDF2 match: ${match}`);
+        return match;
+    } catch (e) {
+        console.error("[AUTH] PBKDF2 verification error:", e);
+        return false;
+    }
 }
 
 import GoogleProvider from "next-auth/providers/google";
@@ -49,13 +67,27 @@ export const authOptions: NextAuthOptions = {
                 }
 
                 try {
-                    console.log(`[AUTH] Attempting login for: ${credentials.email}`);
-                    const user = await prisma.user.findUnique({
-                        where: { email: credentials.email }
+                    const normalizedEmail = credentials.email.toLowerCase().trim();
+                    console.log(`[AUTH] Attempting login for: ${normalizedEmail}`);
+
+                    let user = await prisma.user.findUnique({
+                        where: { email: normalizedEmail }
                     });
 
                     if (!user) {
-                        console.log(`[AUTH] User not found: ${credentials.email}`);
+                        console.log(`[AUTH] Direct lookup failed for ${normalizedEmail}. Trying case-insensitive...`);
+                        user = await prisma.user.findFirst({
+                            where: {
+                                email: {
+                                    equals: normalizedEmail,
+                                    mode: 'insensitive'
+                                }
+                            }
+                        });
+                    }
+
+                    if (!user) {
+                        console.log(`[AUTH] User final lookup failed: ${normalizedEmail}`);
                         throw new Error("USER_NOT_FOUND");
                     }
 
@@ -67,7 +99,10 @@ export const authOptions: NextAuthOptions = {
                     const isPasswordValid = verifyPassword(credentials.password, user.password);
 
                     if (!isPasswordValid) {
-                        console.log(`[AUTH] Invalid password for: ${credentials.email}`);
+                        console.log(`[AUTH] Invalid password for: ${normalizedEmail}`);
+                        // Determine if it was bcrypt or pbkdf2 that failed
+                        const hashType = user.password.startsWith("$2") ? "bcrypt" : "pbkdf2";
+                        console.log(`[AUTH] Verification failed for hash type: ${hashType}`);
                         return null;
                     }
 

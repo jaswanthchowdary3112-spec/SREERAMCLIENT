@@ -1,12 +1,7 @@
-import { NextResponse } from 'next/server'
-import { PrismaClient } from '@prisma/client'
-import fs from 'fs'
-import path from 'path'
-
-export const dynamic = 'force-dynamic'
-export const runtime = 'nodejs'
-
-const prisma = new PrismaClient()
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import fs from 'fs';
+import path from 'path';
 
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
@@ -82,14 +77,14 @@ export async function GET(req: Request) {
         let common: any[] = []
 
         try {
-            const movers = await prisma.market_movers.findMany({
+            const movers = await prisma.marketMover.findMany({
                 select: {
                     type: true,
                     ticker: true,
                     price: true,
-                    change_percent: true,
+                    changePercent: true,
                     session: true,
-                    common_flag: true
+                    commonFlag: true
                 }
             })
 
@@ -97,7 +92,7 @@ export async function GET(req: Request) {
                 const entry = {
                     ticker: m.ticker,
                     price: m.price || 0,
-                    change: m.change_percent || 0,
+                    change: m.changePercent || 0,
                     session: m.session || "Closed"
                 }
 
@@ -113,11 +108,32 @@ export async function GET(req: Request) {
                 if (m.type === "day_ripper") day.rippers.push(entry)
                 if (m.type === "day_dipper") day.dippers.push(entry)
 
-                if (m.common_flag === 1) common.push(entry)
+                if (m.commonFlag === 1) common.push(entry)
             })
 
         } catch (e: any) {
-            console.error("[API Movers] Failed to fetch market_movers:", e.message)
+            console.error("[API Movers] Failed to fetch marketMover:", e.message)
+        }
+
+        // -----------------------
+        // FETCH LIVE QUOTES FOR ALL TICKERS
+        // -----------------------
+        const allTickers = Array.from(new Set([
+            ...m1.rippers, ...m1.dippers,
+            ...m5.rippers, ...m5.dippers,
+            ...m30.rippers, ...m30.dippers,
+            ...day.rippers, ...day.dippers,
+            ...common
+        ].map(e => e.ticker)));
+
+        let quotes: Record<string, any> = {};
+        if (allTickers.length > 0) {
+            try {
+                const { getLiveQuotes } = await import('@/lib/stock-api');
+                quotes = await getLiveQuotes(allTickers);
+            } catch (e) {
+                console.error("[API Movers] Failed to fetch live quotes:", e);
+            }
         }
 
         return NextResponse.json({
@@ -127,7 +143,7 @@ export async function GET(req: Request) {
             day,
             common,
             watchlist: [],
-            quotes: {},
+            quotes: quotes,
             news: [],
             movers: common, // Populate movers with common stocks for the CommonListsPage
             sessions: { preMarket: [], regular: [], postMarket: [] },

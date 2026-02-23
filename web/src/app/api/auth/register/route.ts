@@ -11,7 +11,9 @@ function hashPassword(password: string) {
 
 export async function POST(req: NextRequest) {
     try {
-        const { name, email, password } = await req.json();
+        let { name, email, password } = await req.json();
+
+        if (email) email = email.toLowerCase().trim();
 
         if (!email || !password) {
             return NextResponse.json(
@@ -48,7 +50,7 @@ export async function POST(req: NextRequest) {
     } catch (error: any) {
         console.error("Registration error:", error);
         return NextResponse.json(
-            { message: `Database error: ${error.message || "Internal server error"}` },
+            { message: `Registration failed: ${error.message || "Internal server error"}` },
             { status: 500 }
         );
     }

@@ -408,38 +408,34 @@ export async function getCSVWatchlistStocks(limit: number = 200): Promise<any[]>
     }
 
     try {
-        const csvPath = path.join(process.cwd(), '../Watchlist_New.csv');
-        if (!fs.existsSync(csvPath)) {
-            console.warn(`Watchlist CSV not found at ${csvPath}`);
-            return [];
-        }
+        // Primary Source: Prisma Watchlist table
+        const dbTickers = await prisma.watchlist.findMany({
+            select: { ticker: true, category: true }
+        });
 
-        const fileContent = fs.readFileSync(csvPath, 'utf-8');
-        const lines = fileContent.split('\n').filter(line => line.trim() !== '');
+        let tickerData = dbTickers.map(r => ({
+            category: r.category || 'User Added',
+            ticker: r.ticker
+        }));
 
-        // Skip header and extract Category and Ticker
-        const tickerData = lines.slice(1).map(line => {
-            const parts = line.split(',');
-            return {
-                category: parts[0]?.trim(),
-                ticker: parts[1]?.trim()
-            };
-        }).filter(t => t.ticker && t.ticker.length > 0);
-
-        if (tickerData.length === 0 && !globalThis.watchlistCache) {
-            // allow empty csv if we have db stocks, but for now just warn
-            // console.warn('Watchlist CSV is empty');
-        }
-
-        // Add stocks from DB
+        // Fallback/Legacy Source: CSV (if available)
         try {
-            const dbTickers = await prisma.watchlist.findMany({
-                select: { ticker: true }
-            });
-            dbTickers.forEach(r => {
-                if (r.ticker) tickerData.push({ category: 'User Added', ticker: r.ticker });
-            });
-        } catch (e) { }
+            const csvPath = path.join(process.cwd(), '../Watchlist_New.csv');
+            if (fs.existsSync(csvPath)) {
+                const fileContent = fs.readFileSync(csvPath, 'utf-8');
+                const lines = fileContent.split('\n').filter(line => line.trim() !== '');
+                const csvTickerData = lines.slice(1).map(line => {
+                    const parts = line.split(',');
+                    return {
+                        category: parts[0]?.trim(),
+                        ticker: parts[1]?.trim()
+                    };
+                }).filter(t => t.ticker && t.ticker.length > 0 && !tickerData.some(d => d.ticker === t.ticker));
+                tickerData = [...tickerData, ...csvTickerData];
+            }
+        } catch (e) {
+            console.warn("Watchlist CSV fallback failed or file missing");
+        }
 
         const uniqueTickers = Array.from(new Set(tickerData.map(d => d.ticker)));
         const quotes = await getLiveQuotes(uniqueTickers);
@@ -496,7 +492,7 @@ export async function getCSVWatchlistStocks(limit: number = 200): Promise<any[]>
         return result;
 
     } catch (error) {
-        console.error('Error reading Watchlist CSV:', error);
+        console.error('Error fetching watchlist:', error);
         return [];
     }
 }
@@ -510,6 +506,24 @@ export async function getCSVPortfolioHoldings(): Promise<any[]> {
     }
 
     try {
+        // Primary Source: Prisma PortfolioHolding table
+        const dbHoldings = await prisma.portfolioHolding.findMany();
+
+        if (dbHoldings.length > 0) {
+            const result = dbHoldings.map(h => ({
+                ticker: h.ticker,
+                avgCost: h.avgCost,
+                shares: h.shares
+            }));
+
+            globalThis.portfolioCache = {
+                data: result,
+                timestamp: now
+            };
+            return result;
+        }
+
+        // Fallback: CSV
         const csvPaths = [
             path.join(process.cwd(), '../portfolio.csv'),
             path.join(process.cwd(), 'public/portfolio.csv'),
@@ -525,39 +539,29 @@ export async function getCSVPortfolioHoldings(): Promise<any[]> {
             }
         }
 
-        if (!csvPath) {
-            console.error(`Portfolio CSV not found in any of: ${csvPaths.join(', ')}`);
-            return [];
+        if (csvPath) {
+            const fileContent = fs.readFileSync(csvPath, 'utf-8');
+            const lines = fileContent.split('\n').filter(line => line.trim() !== '');
+            const holdings = lines.slice(1).map(line => {
+                const parts = line.split(',');
+                if (parts.length < 3) return null;
+                return {
+                    ticker: parts[0]?.trim(),
+                    avgCost: parseFloat(parts[1]?.trim().replace('$', '').replace(',', '')) || 0,
+                    shares: parseFloat(parts[2]?.trim().replace(',', '')) || 0
+                };
+            }).filter(h => h && h.ticker);
+
+            globalThis.portfolioCache = {
+                data: holdings,
+                timestamp: now
+            };
+            return holdings;
         }
 
-        const fileContent = fs.readFileSync(csvPath, 'utf-8');
-        const lines = fileContent.split('\n').filter(line => line.trim() !== '');
-
-        // Header: ticker,bought_price,shares
-        const holdings = lines.slice(1).map(line => {
-            const parts = line.split(',');
-            if (parts.length < 3) return null;
-
-            const ticker = parts[0]?.trim();
-            const priceStr = parts[1]?.trim().replace('$', '').replace(',', '');
-            const sharesStr = parts[2]?.trim().replace(',', '');
-
-            return {
-                ticker,
-                avgCost: parseFloat(priceStr) || 0,
-                shares: parseFloat(sharesStr) || 0
-            };
-        }).filter(h => h && h.ticker);
-
-        const result = holdings;
-        globalThis.portfolioCache = {
-            data: result,
-            timestamp: now
-        };
-
-        return result;
+        return [];
     } catch (error) {
-        console.error('Error reading Portfolio CSV:', error);
+        console.error('Error fetching portfolio holdings:', error);
         return [];
     }
 }
