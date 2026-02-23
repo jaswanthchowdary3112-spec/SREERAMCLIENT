@@ -137,39 +137,22 @@ const MoverBox = ({ title, items, color }: { title: string, items: any[], color:
 
 export default function WatchlistPage() {
     const { data: globalData, refreshAll } = useMarketData();
-    const [data, setData] = useState<any[]>(globalData.watchlist);
-    const [movers, setMovers] = useState<any>(globalData.movers);
+    const data = globalData.watchlist;
+    const movers = globalData.movers;
+
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [lastSynced, setLastSynced] = useState<Date>(new Date());
-    const [nextRefresh, setNextRefresh] = useState(15);
     const [isMounted, setIsMounted] = useState(false);
 
-    // Sync from global data
-    useEffect(() => {
-        if (globalData.watchlist.length > 0) setData(globalData.watchlist);
-        if (globalData.movers) setMovers(globalData.movers);
-        setLastSynced(new Date(globalData.lastUpdate || Date.now()));
-    }, [globalData]);
 
     const fetchData = async () => {
         setLoading(true);
         await refreshAll();
         setLoading(false);
-        setNextRefresh(15);
     };
 
     useEffect(() => {
         setIsMounted(true);
         // data is already prefetched by context
-
-        const countdownInterval = setInterval(() => {
-            setNextRefresh(prev => (prev > 0 ? prev - 1 : 15));
-        }, 1000);
-
-        return () => {
-            clearInterval(countdownInterval);
-        };
     }, []);
 
     const [newSymbol, setNewSymbol] = useState('');
@@ -242,7 +225,7 @@ export default function WatchlistPage() {
                     <div className="text-right flex flex-col items-end px-6 border-r border-[var(--border-color)]">
                         <span className="text-[10px] text-[var(--text-primary)] font-bold uppercase tracking-wider mb-0.5">Sync</span>
                         <span className="text-[12px] font-bold text-[var(--accent-blue)] tabular-nums">
-                            {isMounted ? `${nextRefresh}s` : '--s'}
+                            {isMounted ? `ACTIVE` : '--'}
                         </span>
                     </div>
                     <button

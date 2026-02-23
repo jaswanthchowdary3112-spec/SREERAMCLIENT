@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import styles from '@/app/page.module.css';
+import { useMarketData } from '@/components/MarketDataContext';
 
 interface Holding {
     ticker: string;
@@ -24,10 +25,20 @@ interface PriceData {
     changePercent: number;
 }
 
+const safeSetItem = (key: string, value: any) => {
+    try {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem(key, JSON.stringify(value));
+        }
+    } catch (e) {
+        console.warn('LocalStorage save failed', e);
+    }
+};
+
 export default function PortfolioPage() {
+    const { data: marketData } = useMarketData();
     const [holdings, setHoldings] = useState<Holding[]>([]);
     const [loading, setLoading] = useState(true);
-    const [prices, setPrices] = useState<Record<string, PriceData>>({});
 
     // Form State
     const [newTicker, setNewTicker] = useState('');
@@ -85,46 +96,13 @@ export default function PortfolioPage() {
         loadData();
     }, []);
 
-    // 2. Fetch Prices when holdings change
-    useEffect(() => {
-        if (holdings.length === 0) {
-            setLoading(false);
-            return;
-        }
-
-        const fetchPrices = async () => {
-            try {
-                const t = holdings.map(h => h.ticker).join(',');
-                const res = await fetch(`/api/movers?portfolio=${t}`);
-                const json = await res.json();
-                const pricing: Record<string, PriceData> = {};
-
-                if (json.quotes) {
-                    Object.values(json.quotes).forEach((q: any) => {
-                        pricing[q.ticker] = {
-                            price: q.price,
-                            change: q.change,
-                            changePercent: q.changePercent
-                        };
-                    });
-                }
-                setPrices(prev => ({ ...prev, ...pricing }));
-                setLoading(false);
-            } catch (e) {
-                console.error("Failed to fetch prices", e);
-                setLoading(false);
-            }
-        };
-
-        fetchPrices();
-        const interval = setInterval(fetchPrices, 3000); // ULTRA-FAST: 3 seconds
-        return () => clearInterval(interval);
-    }, [holdings.length]);
 
     // 3. Compute Portfolio Data efficiently
     const portfolioData = useMemo(() => {
+        const quotes = marketData.movers?.quotes || {};
+
         return holdings.map(h => {
-            const quote = prices[h.ticker];
+            const quote = quotes[h.ticker];
             const currentPrice = quote?.price || h.avgPrice || 0;
             const avg = h.avgPrice || 0;
             const value = h.shares * currentPrice;
@@ -146,7 +124,7 @@ export default function PortfolioPage() {
                 dayGainPercent
             };
         });
-    }, [holdings, prices]);
+    }, [holdings, marketData.movers]);
 
     // Save to localStorage whenever holdings change
     useEffect(() => {
@@ -296,7 +274,7 @@ export default function PortfolioPage() {
                                     <td className="px-6 py-4 text-right text-[var(--text-primary)] font-bold tabular-nums">{item.shares.toLocaleString()}</td>
                                     <td className="px-6 py-4 text-right text-[var(--text-primary)] font-bold tabular-nums">${(item.avgPrice || 0).toFixed(2)}</td>
                                     <td className="px-6 py-4 text-right font-bold text-[var(--text-primary)] tabular-nums">
-                                        {prices[item.ticker] ? `$${(item.currentPrice || 0).toFixed(2)}` : <span className="text-[10px] text-[var(--accent-gold)] uppercase font-bold">Fetching...</span>}
+                                        {(marketData.movers?.quotes?.[item.ticker]) ? `$${(item.currentPrice || 0).toFixed(2)}` : <span className="text-[10px] text-[var(--accent-gold)] uppercase font-bold">Fetching...</span>}
                                     </td>
                                     <td className="px-6 py-4 text-right font-bold text-[var(--text-primary)] tabular-nums">${(item.value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                     <td className="px-6 py-4 text-right">

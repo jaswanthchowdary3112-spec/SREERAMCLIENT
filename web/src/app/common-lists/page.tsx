@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import styles from '@/app/page.module.css';
+import { useMarketData } from '@/components/MarketDataContext';
 
 const Table = dynamic(() => import('@/components/Table'), {
     ssr: false,
@@ -48,51 +49,38 @@ const columns = [
 ];
 
 export default function CommonListsPage() {
-    const [data, setData] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const { data: marketData, isLoading } = useMarketData();
 
-    const fetchData = async () => {
-        try {
-            const res = await fetch('/api/movers');
-            const json = await res.json();
+    const data = useMemo(() => {
+        const movers = marketData.movers;
+        // In Movers API, common is return as a key, or we fallback to filtering movers
+        const commonRaw = (movers?.common && movers.common.length > 0)
+            ? movers.common
+            : (movers?.movers ? movers.movers.filter((m: any) => m.commonFlag === 1) : []);
 
-            if (json.movers) {
-                const commonRaw = json.movers.filter((m: any) => m.common_flag === 1);
-                const uniqueTickers = Array.from(new Set(commonRaw.map((m: any) => m.ticker))) as string[];
+        const quotes = movers?.quotes || {};
 
-                const tableData = uniqueTickers.map(ticker => {
-                    const m = commonRaw.find((item: any) => item.ticker === ticker);
-                    const q = (json as any).quotes ? (json as any).quotes[ticker] : null;
+        const uniqueTickers = Array.from(new Set(commonRaw.map((m: any) => m.ticker))) as string[];
 
-                    const price = q?.price || m?.price || 0;
-                    const prevClose = q?.prevClose || m?.prevClose || 0;
-                    const open = q?.openPrice || m?.openPrice || prevClose || 0;
+        return uniqueTickers.map(ticker => {
+            const m = commonRaw.find((item: any) => item.ticker === ticker);
+            const q = quotes[ticker];
 
-                    return {
-                        ticker: ticker,
-                        price: price,
-                        openPrice: open,
-                        prevClose: prevClose,
-                        oChangePercent: open > 0 ? ((price - open) / open) * 100 : 0,
-                        pChangePercent: prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : 0,
-                        lastUpdated: q?.lastUpdated || Date.now()
-                    };
-                });
+            const price = q?.price || m?.price || 0;
+            const prevClose = q?.prevClose || m?.prevClose || 0;
+            const open = q?.openPrice || m?.openPrice || prevClose || 0;
 
-                setData(tableData);
-            }
-            setLoading(false);
-        } catch (error) {
-            console.error('Failed to fetch common lists', error);
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        fetchData();
-        const interval = setInterval(fetchData, 3000); // ULTRA-FAST: 3 seconds
-        return () => clearInterval(interval);
-    }, []);
+            return {
+                ticker: ticker,
+                price: price,
+                openPrice: open,
+                prevClose: prevClose,
+                oChangePercent: open > 0 ? ((price - open) / open) * 100 : 0,
+                pChangePercent: prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : 0,
+                lastUpdated: q?.lastUpdated || Date.now()
+            };
+        });
+    }, [marketData.movers]);
 
     return (
         <div className={styles.dashboard}>
@@ -102,7 +90,7 @@ export default function CommonListsPage() {
             </header>
 
             <section className={styles.section}>
-                <Table columns={columns} data={data} loading={loading && data.length === 0} />
+                <Table columns={columns} data={data} loading={isLoading && data.length === 0} />
             </section>
         </div>
     );

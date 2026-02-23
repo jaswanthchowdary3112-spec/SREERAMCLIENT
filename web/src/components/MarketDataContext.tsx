@@ -63,7 +63,7 @@ export function MarketDataProvider({ children }: { children: ReactNode }) {
             if (momJson || movJson) {
                 setData(prev => ({
                     ...prev,
-                    watchlist: momJson?.stocks || prev.watchlist,
+                    watchlist: movJson?.watchlist || momJson?.stocks || prev.watchlist,
                     movers: movJson || prev.movers,
                     lastUpdate: (momJson || movJson) ? Date.now() : prev.lastUpdate
                 }));

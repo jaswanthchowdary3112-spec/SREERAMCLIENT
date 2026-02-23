@@ -95,7 +95,8 @@ export async function GET(req: Request) {
                     ticker: m.ticker,
                     price: m.price || 0,
                     change: m.changePercent || 0,
-                    session: m.session || "Closed"
+                    session: m.session || "Closed",
+                    commonFlag: m.commonFlag || 0
                 }
 
                 if (m.type === "1m_ripper") m1.rippers.push(entry)
