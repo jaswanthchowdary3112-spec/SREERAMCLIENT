@@ -42,26 +42,17 @@ export default function Dashboard({
     initialPortfolio = [],
     initialQuotes = {}
 }: DashboardProps) {
-    const { data: globalData, refreshAll } = useMarketData();
+    const { data: globalData, isLoading } = useMarketData();
     const { data: session } = useSession();
 
-    // Start with global data to ensure INSTANT rendering upon page switch
-    const [moverData, setMoverData] = useState<MoverData>(globalData.movers || {
-        m1: { rippers: [], dippers: [] },
-        m5: { rippers: [], dippers: [] },
-        m30: { rippers: [], dippers: [] },
-        day: { rippers: [], dippers: [] },
-        news: [],
-        quotes: {},
-        watchlist: []
-    });
-
-    const [quotes, setQuotes] = useState<Record<string, any>>(globalData.movers?.quotes || initialQuotes || {});
-    const [gainers, setGainers] = useState(globalData.movers?.day?.rippers || initialGainers || []);
-    const [losers, setLosers] = useState(globalData.movers?.day?.dippers || initialLosers || []);
-    const [watchlist, setWatchlist] = useState(globalData.watchlist || initialWatchlist || []);
-    const [news, setNews] = useState<any[]>(globalData.movers?.news || []);
-    const [categories, setCategories] = useState<any[]>([]);
+    // Mapping global context to local variable names used in JSX
+    const moverData = globalData.movers;
+    const quotes = globalData.movers?.quotes || initialQuotes || {};
+    const gainers = globalData.movers?.day?.rippers || initialGainers || [];
+    const losers = globalData.movers?.day?.dippers || initialLosers || [];
+    const watchlist = globalData.watchlist || initialWatchlist || [];
+    const news = globalData.movers?.news || [];
+    const categories: any[] = []; // Placeholder for category analysis
 
     const portfolioHoldings = initialPortfolio;
     const [mounted, setMounted] = useState(false);
@@ -96,128 +87,16 @@ export default function Dashboard({
         return () => clearInterval(timer);
     }, []);
 
-    const fetchData = async () => {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout for main data
-
-        try {
-            let portfolioParam = '';
-            const savedHoldings = localStorage.getItem('userHoldings');
-            if (savedHoldings && savedHoldings.trim() !== '' && savedHoldings !== 'undefined' && savedHoldings !== 'null') {
-                try {
-                    const holdings = JSON.parse(savedHoldings);
-                    if (Array.isArray(holdings) && holdings.length > 0) {
-                        const tickers = holdings.map((h: any) => h.ticker).filter((t: string) => !!t).join(',');
-                        if (tickers) portfolioParam = `?portfolio=${encodeURIComponent(tickers)}`;
-                    }
-                } catch (e) {
-                    console.warn("Could not parse saved holdings, clearing corrupted data", e);
-                    localStorage.removeItem('userHoldings');
-                }
-            }
-
-            const res = await fetch(`/api/movers${portfolioParam}`, {
-                signal: controller.signal,
-                headers: { 'Cache-Control': 'no-cache' }
-            });
-            clearTimeout(timeoutId);
-
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const json = await res.json();
-            if (!json || typeof json !== 'object') throw new Error('Invalid JSON response');
-
-            const newData = {
-                moverData: {
-                    m1: json.m1 || { rippers: [], dippers: [] },
-                    m5: json.m5 || { rippers: [], dippers: [] },
-                    m30: json.m30 || { rippers: [], dippers: [] },
-                    day: json.day || { rippers: [], dippers: [] },
-                    news: json.news || [],
-                    quotes: json.quotes || {},
-                    watchlist: json.watchlist || []
-                },
-                gainers: json.day?.rippers || [],
-                losers: json.day?.dippers || [],
-                news: json.news || [],
-                quotes: json.quotes || {},
-                watchlist: json.watchlist || []
-            };
-
-            setGainers(newData.gainers);
-            setLosers(newData.losers);
-            setMoverData(newData.moverData);
-            setNews(newData.news);
-            setQuotes(newData.quotes);
-            setWatchlist(newData.watchlist);
-
-            if (json.engineStatus) {
-                // Ensure the lastUpdate is relative to the current session if it represents the sync event
-                const syncTime = json.engineStatus.lastUpdate || new Date().toISOString();
-                setEngineStatus({
-                    ...json.engineStatus,
-                    lastUpdate: syncTime
-                });
-            }
-
-            if (json.botStats) {
-                setBotStatus(json.botStats);
-            }
-
-
-        } catch (error: any) {
-            clearTimeout(timeoutId);
-            // Silently handle fetch errors - fallback data is already displayed
-            // Only update engine status to show offline state
-            if (error.name !== 'AbortError') {
-                setEngineStatus({
-                    isLive: false,
-                    lastUpdate: engineStatus.lastUpdate, // Keep last known update
-                    statusText: 'Connecting...'
-                });
-            }
-            // Don't log error to console - it's expected when API is unavailable
-        }
-    };
-
-    const fetchCategoryData = async () => {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
-
-        try {
-            const res = await fetch('/api/category-analysis', {
-                signal: controller.signal,
-                headers: { 'Cache-Control': 'no-cache' }
-            });
-            clearTimeout(timeoutId);
-
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const json = await res.json();
-
-            if (json.success && json.categories) {
-                setCategories(json.categories);
-            }
-        } catch (error: any) {
-            clearTimeout(timeoutId);
-            // Suppress "Failed to fetch" or "AbortError" to keep console clean for client
-            if (error.name !== 'AbortError' && error.message !== 'Failed to fetch') {
-                console.warn('Category update skipped (background)', error.message);
-            }
-        }
-    };
 
     // Sync from Global Context
     useEffect(() => {
-        if (globalData.watchlist?.length > 0) setWatchlist(globalData.watchlist);
-        if (globalData.movers) {
-            setMoverData(globalData.movers);
-            setGainers(globalData.movers.day?.rippers || []);
-            setLosers(globalData.movers.day?.dippers || []);
-            setNews(globalData.movers.news || []);
-            setQuotes(globalData.movers.quotes || {});
+        if (globalData.movers?.engineStatus) {
             setEngineStatus(globalData.movers.engineStatus);
+        }
+        if (globalData.movers?.botStats) {
             setBotStatus(globalData.movers.botStats);
         }
-    }, [globalData]);
+    }, [globalData.movers]);
 
     useEffect(() => {
         if (Object.keys(quotes || {}).length > 0) {
@@ -227,107 +106,8 @@ export default function Dashboard({
 
     useEffect(() => {
         setMounted(true);
-
-        // Load user preference for refresh interval
-        const savedInterval = localStorage.getItem('refreshInterval');
-        const pollFrequency = savedInterval ? parseInt(savedInterval) * 1000 : 1000; // Use saved or default 1s
-
-        // --- REAL-TIME WEBSOCKET CONNECTION ---
-        const connectWebSocket = () => {
-            // Avoid multiple connections
-            if (wsRef.current?.readyState === WebSocket.OPEN) return;
-
-            // Handle secure vs insecure WebSocket protocol
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.hostname}:3001`;
-
-            try {
-                const ws = new WebSocket(wsUrl);
-                wsRef.current = ws;
-
-                ws.onopen = () => {
-                    console.log('Connected to StockTrack Real-Time Stream');
-                };
-
-                ws.onmessage = (event) => {
-                    try {
-                        const payload = JSON.parse(event.data);
-                        if (payload.type === 'UPDATE' && payload.data) {
-                            const json = payload.data;
-                            // console.log('Received Real-Time Update', new Date().toLocaleTimeString());
-
-                            const newData = {
-                                moverData: {
-                                    m1: json.m1 || { rippers: [], dippers: [] },
-                                    m5: json.m5 || { rippers: [], dippers: [] },
-                                    m30: json.m30 || { rippers: [], dippers: [] },
-                                    day: json.day || { rippers: [], dippers: [] },
-                                    news: json.news || [],
-                                    quotes: json.quotes || {},
-                                    watchlist: json.watchlist || []
-                                },
-                                gainers: json.day?.rippers || [],
-                                losers: json.day?.dippers || [],
-                                news: json.news || [],
-                                quotes: json.quotes || {},
-                                watchlist: json.watchlist || []
-                            };
-
-                            setGainers(newData.gainers);
-                            setLosers(newData.losers);
-                            setMoverData(newData.moverData);
-                            setNews(newData.news);
-                            setQuotes(newData.quotes);
-                            setWatchlist(newData.watchlist);
-                            if (json.engineStatus) {
-                                setEngineStatus(json.engineStatus);
-                            }
-                            if (json.botStats) {
-                                setBotStatus(json.botStats);
-                            }
-                        }
-                    } catch (e) {
-                        console.error('WS Message Error:', e);
-                    }
-                };
-
-                ws.onclose = () => {
-                    // console.log('WS Disconnected, retrying in 2s...');
-                    wsRef.current = null;
-                    setTimeout(connectWebSocket, 5000);
-                };
-
-                // console.warn('WS Error:', err);
-                if (wsRef.current) {
-                    wsRef.current.close();
-                }
-            } catch (err) {
-                console.error('WebSocket connection error:', err);
-            }
-        };
-
-        // Start WebSocket connection
-        connectWebSocket();
-
-
-
-        // Fetch fresh data immediately
-        fetchData();
-
-        // Optimized Polling: 15s backup (WS handles real-time)
-        const interval = setInterval(() => {
-            if (wsRef.current?.readyState !== WebSocket.OPEN) {
-                fetchData();
-            }
-        }, 15000);
-
-        const categoryInterval = setInterval(fetchCategoryData, 10000);
-
-        return () => {
-            if (interval) clearInterval(interval);
-            clearInterval(categoryInterval);
-            if (wsRef.current) wsRef.current.close();
-        };
+        const timer = setTimeout(() => setIsInitializing(false), 5000);
+        return () => clearTimeout(timer);
     }, []);
 
     const displayNews = news || [];

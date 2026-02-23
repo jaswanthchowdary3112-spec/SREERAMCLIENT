@@ -89,7 +89,8 @@ model MarketMover {
   prevCloseGap  Float?
   updatedAt     DateTime @default(now())
   common_flag    Int?     @default(0)
-  
+  dayOpen       Float?
+  prevClose     Float?
 }
 
 model News {

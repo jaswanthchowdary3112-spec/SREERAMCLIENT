@@ -86,7 +86,9 @@ export async function GET(req: Request) {
                     price: true,
                     changePercent: true,
                     session: true,
-                    commonFlag: true
+                    commonFlag: true,
+                    dayOpen: true,
+                    prevClose: true
                 }
             })
 
@@ -94,9 +96,12 @@ export async function GET(req: Request) {
                 const entry = {
                     ticker: m.ticker,
                     price: m.price || 0,
-                    change: m.changePercent || 0,
+                    change: m.changePercent || 0, // Backward compatibility
+                    changePercent: m.changePercent || 0,
                     session: m.session || "Closed",
-                    commonFlag: m.commonFlag || 0
+                    commonFlag: m.commonFlag || 0,
+                    openPrice: m.dayOpen || m.price || 0,
+                    prevClose: m.prevClose || 0
                 }
 
                 if (m.type === "1m_ripper") m1.rippers.push(entry)

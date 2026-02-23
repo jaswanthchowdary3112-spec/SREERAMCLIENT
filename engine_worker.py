@@ -33,14 +33,14 @@ con = psycopg2.connect(DATABASE_URL)
 con.autocommit = True
 cur = con.cursor()
 
-print("✅ Connected to PostgreSQL")
+print("Connected to PostgreSQL", flush=True)
 
 # ==============================
 # CREATE TABLES
 # ==============================
 
 cur.execute("""
-CREATE TABLE IF NOT EXISTS "TickerStat" (
+CREATE TABLE IF NOT EXISTS "EnginePriceStat" (
     id SERIAL PRIMARY KEY,
     ticker TEXT,
     price DOUBLE PRECISION,
@@ -54,6 +54,9 @@ CREATE TABLE IF NOT EXISTS "TickerStat" (
 );
 """)
 
+cur.execute('CREATE INDEX IF NOT EXISTS "EnginePriceStat_ticker_cbucket" ON "EnginePriceStat" ("ticker", "cbucket" DESC);')
+cur.execute('CREATE INDEX IF NOT EXISTS "EnginePriceStat_ts" ON "EnginePriceStat" ("ts" DESC);')
+
 cur.execute("""
 CREATE TABLE IF NOT EXISTS "MarketMover" (
     id SERIAL PRIMARY KEY,
@@ -63,11 +66,13 @@ CREATE TABLE IF NOT EXISTS "MarketMover" (
     "changePercent" DOUBLE PRECISION,
     session TEXT,
     "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    "commonFlag" INTEGER DEFAULT 0
+    "commonFlag" INTEGER DEFAULT 0,
+    "dayOpen" DOUBLE PRECISION,
+    "prevClose" DOUBLE PRECISION
 );
 """)
 
-print("✅ Tables verified")
+print("Tables verified")
 
 # ==============================
 # LOAD WATCHLIST
@@ -122,7 +127,7 @@ def get_session():
 
 def fetch_and_store(stocks):
     session = get_session()
-    now = datetime.utcnow()
+    now = datetime.now(ZoneInfo("UTC"))
     cbucket = now.hour * 60 + now.minute
     cb_date = date.today().strftime("%b-%d-%Y")
 
@@ -158,139 +163,166 @@ def fetch_and_store(stocks):
         execute_values(
             cur,
             """
-            INSERT INTO "TickerStat"
+            INSERT INTO "EnginePriceStat"
             (ticker, price, "dayOpen", "prevClose", "changePercent", session, "cbDate", cbucket, ts)
             VALUES %s
             """,
             [(r[3], r[4], r[5], r[6], r[7], r[2], r[0], r[1], r[8]) for r in rows]
         )
 
-        print(f"Inserted {len(rows)} snapshots")
+        print(f"Inserted {len(rows)} snapshots for {len(stocks)} tickers")
 
 # ==============================
 # ROLLING CLEANUP (3 HOURS)
 # ==============================
 
 def rolling_cleanup():
-    cutoff = datetime.utcnow() - timedelta(hours=3)
-    cur.execute('DELETE FROM "TickerStat" WHERE ts < %s', (cutoff,))
-    print("Cleanup complete")
+    cutoff = datetime.now(ZoneInfo("UTC")) - timedelta(hours=3)
+    cur.execute('DELETE FROM "EnginePriceStat" WHERE ts < %s', (cutoff,))
+    print("Cleanup complete", flush=True)
 
 # ==============================
 # MOMENTUM ENGINE
 # ==============================
 
 def calculate_momentum():
-    print("Calculating momentum...")
+    print("Calculating momentum for all tickers...", flush=True)
+    start_time = time.time()
+    now = datetime.now(ZoneInfo("UTC"))
 
+    # 1. Fetch all unique tickers and their latest stats
     cur.execute("""
-        SELECT DISTINCT ON (ticker)
-        ticker, price, cbucket, "dayOpen", "prevClose"
-        FROM "TickerStat"
-        ORDER BY ticker, ts DESC
+        SELECT ticker, price, cbucket, "dayOpen", "prevClose"
+        FROM (
+            SELECT ticker, price, cbucket, "dayOpen", "prevClose",
+                   ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY ts DESC) as rn
+            FROM "EnginePriceStat"
+        ) t
+        WHERE rn = 1
     """)
-    latest_rows = cur.fetchall()
+    latest_stats = cur.fetchall()
 
-    if not latest_rows:
-        print("No latest rows found")
+    if not latest_stats:
+        print("No data found in EnginePriceStat yet.")
         return
 
+    # 2. Fetch all historical data for the last 40 minutes to do in-memory lookups
+    print(f"Fetching historical data for {len(latest_stats)} tickers...", flush=True)
+    window_start = now - timedelta(minutes=45)
+    cur.execute("""
+        SELECT ticker, price, cbucket
+        FROM "EnginePriceStat"
+        WHERE ts > %s
+        ORDER BY ticker, cbucket DESC
+    """, (window_start,))
+    history_rows = cur.fetchall()
+    print(f"Retrieved {len(history_rows)} historical rows.", flush=True)
+    
+    # Organize history by ticker
+    history = {}
+    for t_ticker, t_price, t_bucket in history_rows:
+        if t_ticker not in history:
+            history[t_ticker] = []
+        history[t_ticker].append((t_bucket, t_price))
+
     movers = []
-    now = datetime.utcnow()
 
-    for ticker, price, cbucket, day_open, prev_close in latest_rows:
+    for ticker, price, cbucket, day_open, prev_close in latest_stats:
+        ticker_history = history.get(ticker, [])
 
-        def get_price_offset(offset):
-            cur.execute("""
-                SELECT price FROM "TickerStat"
-                WHERE ticker = %s
-                AND cbucket <= %s
-                ORDER BY cbucket DESC
-                LIMIT 1
-            """, (ticker, cbucket - offset))
-            row = cur.fetchone()
-            return row[0] if row else None
+        def find_price_at_bucket(target_bucket):
+            # Find the closest bucket <= target_bucket
+            for h_bucket, h_price in ticker_history:
+                if h_bucket <= target_bucket:
+                    return h_price
+            return None
+
+        p1 = find_price_at_bucket(cbucket - 1)
+        p5 = find_price_at_bucket(cbucket - 5)
+        p30 = find_price_at_bucket(cbucket - 30)
 
         def pct(old, new):
-            if not old:
+            if not old or old == 0:
                 return 0
             return ((new - old) / old) * 100
-
-        p1 = get_price_offset(1)
-        p5 = get_price_offset(5)
-        p30 = get_price_offset(30)
 
         one_min = pct(p1, price)
         five_min = pct(p5, price)
         thirty_min = pct(p30, price)
         day_change = pct(prev_close, price)
 
-        # Thresholds (can adjust later)
-        if one_min > 0.2:
-            movers.append(("1m_ripper", ticker, price, one_min))
-        if one_min < -0.2:
-            movers.append(("1m_dipper", ticker, price, one_min))
+        # Thresholds
+        if day_change > 1.0:
+            movers.append(("day_ripper", ticker, price, day_change, day_open, prev_close))
+        elif day_change < -1.0:
+            movers.append(("day_dipper", ticker, price, day_change, day_open, prev_close))
+        
+        if one_min > 0.4:
+            movers.append(("1m_ripper", ticker, price, one_min, day_open, prev_close))
+        elif one_min < -0.4:
+            movers.append(("1m_dipper", ticker, price, one_min, day_open, prev_close))
 
-        if five_min > 0.5:
-            movers.append(("5m_ripper", ticker, price, five_min))
-        if five_min < -0.5:
-            movers.append(("5m_dipper", ticker, price, five_min))
+        if five_min > 0.8:
+            movers.append(("5m_ripper", ticker, price, five_min, day_open, prev_close))
+        elif five_min < -0.8:
+            movers.append(("5m_dipper", ticker, price, five_min, day_open, prev_close))
 
-        if thirty_min > 1:
-            movers.append(("30m_ripper", ticker, price, thirty_min))
-        if thirty_min < -1:
-            movers.append(("30m_dipper", ticker, price, thirty_min))
-
-        if day_change > 2:
-            movers.append(("day_ripper", ticker, price, day_change))
-        if day_change < -2:
-            movers.append(("day_dipper", ticker, price, day_change))
-
+        if thirty_min > 1.5:
+            movers.append(("30m_ripper", ticker, price, thirty_min, day_open, prev_close))
+        elif thirty_min < -1.5:
+            movers.append(("30m_dipper", ticker, price, thirty_min, day_open, prev_close))
+            
     # Clear old movers
     cur.execute('DELETE FROM "MarketMover"')
 
     common_tickers = get_common_tickers()
 
-    for mtype, ticker, price, change in movers:
-        is_common = 1 if ticker.upper() in common_tickers else 0
-        cur.execute("""
-            INSERT INTO "MarketMover"
-            (type, ticker, price, "changePercent", session, "updatedAt", "commonFlag")
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (
-            mtype,
-            ticker,
-            price,
-            change,
-            get_session(),
-            now,
-            is_common
-        ))
-
-    print(f"Inserted {len(movers)} movers")
+    if not movers:
+        print("Scanned tickers, but no movers met the momentum thresholds yet.")
+    else:
+        for mtype, ticker, price, change, op, pc in movers:
+            is_common = 1 if ticker.upper() in common_tickers else 0
+            cur.execute("""
+                INSERT INTO "MarketMover"
+                (type, ticker, price, "changePercent", session, "updatedAt", "commonFlag", "dayOpen", "prevClose")
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                mtype,
+                ticker,
+                price,
+                change,
+                get_session(),
+                now,
+                is_common,
+                op,
+                pc
+            ))
+        print(f"Momentum calculation complete. Inserted {len(movers)} movers in {time.time() - start_time:.2f}s")
 
 # ==============================
 # MAIN LOOP
 # ==============================
 
-print("🚀 Engine Started")
+print("Engine Started")
 
 while True:
     try:
+        print(f"Cycle Start: {datetime.now().strftime('%H:%M:%S')}", flush=True)
         stocks = load_watchlist()
 
         if not stocks:
-            print("No stocks found in Watchlist_New.csv")
+            print("No stocks found in Watchlist_New.csv or Database", flush=True)
             time.sleep(30)
             continue
 
+        print(f"Fetching snapshots for {len(stocks)} tickers...", flush=True)
         fetch_and_store(stocks)
         rolling_cleanup()
         calculate_momentum()
 
-        print("Cycle complete. Sleeping 30s...\n")
+        print("Cycle complete. Sleeping 30s...\n", flush=True)
         time.sleep(30)
 
     except Exception as e:
-        print("Engine Error:", e)
+        print("Engine Error:", e, flush=True)
         time.sleep(10)
