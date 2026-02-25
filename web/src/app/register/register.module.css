@@ -11,26 +11,13 @@
 
 .loginWrapper {
     width: 100%;
-    max-width: 1100px;
-    min-height: 650px;
-    display: flex;
+    max-width: 500px;
+    min-height: auto;
     background: white;
     border-radius: 24px;
     overflow: hidden;
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1);
     margin: 20px;
-}
-
-.brandSection {
-    flex: 1.1;
-    background: linear-gradient(135deg, #d93025 0%, #a51d14 100%);
-    padding: 60px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    position: relative;
-    overflow: hidden;
-    color: white;
 }
 
 .formSection {
@@ -40,6 +27,7 @@
     flex-direction: column;
     justify-content: center;
     background: white;
+    position: relative;
 }
 
 /* Decorative Elements */
@@ -151,7 +139,7 @@
 }
 
 .welcomeText {
-    font-size: 1.85rem;
+    font-size: 2rem;
     font-weight: 700;
     color: #1e293b;
     margin-bottom: 0;
@@ -214,13 +202,6 @@
     cursor: pointer;
 }
 
-.forgotLink {
-    font-size: 0.875rem;
-    color: #d93025;
-    font-weight: 700;
-    text-decoration: none;
-}
-
 .primaryButton {
     width: 100%;
     padding: 18px;
@@ -240,31 +221,21 @@
     transform: translateY(-1px);
 }
 
-.signupText {
+.error {
+    color: #d93025;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-bottom: 12px;
     text-align: center;
-    font-size: 0.9rem;
-    color: #94a3b8;
-    margin-top: 24px;
 }
 
-.signupLink {
-    color: #1e293b;
-    font-weight: 700;
-    text-decoration: none;
-    background: none;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    font-size: 0.9rem;
-}
-
-.adminSection {
+.loginSection {
     margin-top: 40px;
     display: flex;
     justify-content: center;
 }
 
-.adminButton {
+.loginButton {
     background: #f1f5f9;
     color: #94a3b8;
     border: none;
@@ -276,7 +247,7 @@
     transition: all 0.2s;
 }
 
-.adminButton:hover {
+.loginButton:hover {
     background: #e2e8f0;
     color: #475569;
 }

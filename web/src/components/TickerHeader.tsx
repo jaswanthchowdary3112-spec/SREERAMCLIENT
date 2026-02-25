@@ -111,7 +111,11 @@ export default function TickerHeader() {
         );
     };
 
-    if (pathname === '/login') return null;
+    // List of routes where the ticker header should be hidden (admin/auth pages)
+    const hideOnRoutes = ['/login', '/admin-login', '/automation', '/twitter', '/settings', '/register'];
+    const shouldHide = hideOnRoutes.some(route => pathname === route || pathname?.startsWith(route + '/'));
+
+    if (shouldHide) return null;
 
     return (
         <div className={styles.tickerHeader}>

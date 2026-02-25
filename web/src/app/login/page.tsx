@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { Mail, Lock, User, TrendingUp, Chrome, Facebook, Apple, ArrowLeft } from 'lucide-react';
+import { Mail, Lock, User, TrendingUp, ArrowLeft, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import s from './login.module.css';
 
@@ -247,16 +247,6 @@ export default function LoginPage() {
                         </button>
                     </form>
 
-                    <div className={s.divider}>
-                        <span>or login with</span>
-                    </div>
-
-                    <div className={s.socialGrid}>
-                        <button className={s.socialButton} aria-label="Google"><Chrome size={20} color="#EA4335" /></button>
-                        <button className={s.socialButton} aria-label="Facebook"><Facebook size={20} color="#1877F2" /></button>
-                        <button className={s.socialButton} aria-label="Apple"><Apple size={20} color="#000000" /></button>
-                    </div>
-
                     <div className={s.signupText}>
                         {isLogin ? "Don't Have an account?" : "Already Have an account?"}
                         <button
@@ -266,7 +256,17 @@ export default function LoginPage() {
                                 setError('');
                             }}
                         >
-                            {isLogin ? 'Create Account' : 'Login Now'}
+                            {isLogin ? ' Create Account' : ' Login Now'}
+                        </button>
+                    </div>
+
+                    <div className={s.adminSection}>
+                        <button
+                            type="button"
+                            className={s.adminButton}
+                            onClick={() => router.push('/admin-login')}
+                        >
+                            Admin Login
                         </button>
                     </div>
                 </div>

@@ -31,8 +31,8 @@ export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(false);
   const { data: session } = useSession();
 
-  // Don't show sidebar on login page
-  if (pathname === '/login') return null;
+  // Don't show sidebar on login, admin-login, or registration pages
+  if (pathname === '/login' || pathname === '/admin-login' || pathname === '/register') return null;
 
   const toggleSidebar = () => setIsOpen(!isOpen);
   const closeSidebar = () => setIsOpen(false);

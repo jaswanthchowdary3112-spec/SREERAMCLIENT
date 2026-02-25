@@ -40,6 +40,7 @@
     flex-direction: column;
     justify-content: center;
     background: white;
+    position: relative;
 }
 
 /* Decorative Elements */
@@ -151,7 +152,7 @@
 }
 
 .welcomeText {
-    font-size: 1.85rem;
+    font-size: 2rem;
     font-weight: 700;
     color: #1e293b;
     margin-bottom: 0;
@@ -240,22 +241,12 @@
     transform: translateY(-1px);
 }
 
-.signupText {
+.error {
+    color: #d93025;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-bottom: 12px;
     text-align: center;
-    font-size: 0.9rem;
-    color: #94a3b8;
-    margin-top: 24px;
-}
-
-.signupLink {
-    color: #1e293b;
-    font-weight: 700;
-    text-decoration: none;
-    background: none;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    font-size: 0.9rem;
 }
 
 .adminSection {
