@@ -12,17 +12,12 @@ export async function GET(req: Request) {
     const portfolioSet = new Set(portfolioTickers.map(t => t.toUpperCase()))
 
     try {
-<<<<<<< HEAD
-        // -----------------------
-        // WATCHLIST CACHE
-=======
         // --- LAZY REFRESH ---
         // Ensure data is fresh (updates if older than 5 mins)
         await ensureMoversAreFresh();
 
         // -----------------------
         // WATCHLIST CACHE (Legacy/Fallback)
->>>>>>> 4aead95 (Fix: Penny Stocks, Common Lists, Overnight Analysis, and Market Sessions crash. Applied core data flow and session detection logic.)
         // -----------------------
         const csvPaths = [
             path.join(process.cwd(), '../Watchlist_New.csv'),
@@ -174,46 +169,6 @@ export async function GET(req: Request) {
                 select: { ticker: true, category: true }
             });
 
-<<<<<<< HEAD
-            const watchlistTickers = dbWatchlist.map(w => w.ticker);
-            const { getLiveQuotes } = await import('../../../lib/stock-api');
-            const watchlistQuotes = await getLiveQuotes(watchlistTickers);
-
-            watchlist = dbWatchlist.map(w => ({
-                ...w,
-                ...(watchlistQuotes[w.ticker] || { price: 0, changePercent: 0 })
-            }));
-
-            // Sector Analysis
-            const sectorGroups: Record<string, { totalChange: number, count: number, gainers: number, losers: number }> = {};
-
-            watchlist.forEach(w => {
-                const name = w.category || 'General';
-                const change = w.changePercent || 0;
-
-                if (!sectorGroups[name]) {
-                    sectorGroups[name] = { totalChange: 0, count: 0, gainers: 0, losers: 0 };
-                }
-
-                sectorGroups[name].totalChange += change;
-                sectorGroups[name].count += 1;
-                if (change > 0) sectorGroups[name].gainers += 1;
-                else if (change < 0) sectorGroups[name].losers += 1;
-            });
-
-            categories = Object.entries(sectorGroups).map(([name, stats]) => ({
-                category: name,
-                averageChange: stats.totalChange / stats.count,
-                totalStocks: stats.count,
-                gainers: stats.gainers,
-                losers: stats.losers,
-                neutral: stats.count - stats.gainers - stats.losers,
-                strength: (stats.gainers / stats.count) * 100
-            })).sort((a, b) => b.averageChange - a.averageChange);
-
-            (global as any).lastCategories = categories;
-
-=======
             if (dbWatchlist.length === 0) {
                 watchlist = [];
                 categories = [];
@@ -261,7 +216,6 @@ export async function GET(req: Request) {
 
                 (global as any).lastCategories = categories;
             }
->>>>>>> 4aead95 (Fix: Penny Stocks, Common Lists, Overnight Analysis, and Market Sessions crash. Applied core data flow and session detection logic.)
         } catch (e) {
             console.error("[API Movers] Watchlist/Sector processing failed:", e);
             categories = (global as any).lastCategories || [];
@@ -285,9 +239,6 @@ export async function GET(req: Request) {
                     tweetCount: 0,
                     isActive: true
                 },
-<<<<<<< HEAD
-                categories
-=======
                 categories,
                 all: [
                     ...m1.rippers, ...m1.dippers,
@@ -296,7 +247,6 @@ export async function GET(req: Request) {
                     ...day.rippers, ...day.dippers,
                     ...common
                 ]
->>>>>>> 4aead95 (Fix: Penny Stocks, Common Lists, Overnight Analysis, and Market Sessions crash. Applied core data flow and session detection logic.)
             },
             watchlist,
             categories,
