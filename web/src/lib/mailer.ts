@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 
 const transporter = nodemailer.createTransport({
+<<<<<<< HEAD
     service: 'gmail',
     auth: {
         user: process.env.EMAIL_USER,
@@ -23,6 +24,30 @@ export async function sendAdminApprovalEmail(admin: AdminInfo) {
     const rejectUrl = `${appUrl}/api/admin/approve?token=${admin.approvalToken}&action=reject`;
 
     const html = `
+=======
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+interface AdminInfo {
+  id: string;
+  name: string;
+  email: string;
+  approvalToken: string;
+}
+
+export async function sendAdminApprovalEmail(admin: AdminInfo) {
+  const appUrl = process.env.APP_URL || 'http://localhost:3000';
+  const ownerEmail = 'jaswanthvellanki11@gmail.com';
+
+  const acceptUrl = `${appUrl}/api/admin/approve?token=${admin.approvalToken}&action=accept`;
+  const rejectUrl = `${appUrl}/api/admin/approve?token=${admin.approvalToken}&action=reject`;
+
+  const html = `
+>>>>>>> 4aead95 (Fix: Penny Stocks, Common Lists, Overnight Analysis, and Market Sessions crash. Applied core data flow and session detection logic.)
     <!DOCTYPE html>
     <html>
     <head>
@@ -103,6 +128,7 @@ export async function sendAdminApprovalEmail(admin: AdminInfo) {
     </html>
   `;
 
+<<<<<<< HEAD
     await transporter.sendMail({
         from: `"StockTrack System" <${process.env.EMAIL_USER}>`,
         to: ownerEmail,
@@ -111,4 +137,14 @@ export async function sendAdminApprovalEmail(admin: AdminInfo) {
     });
 
     console.log(`[MAILER] Approval email sent to ${ownerEmail} for ${admin.email}`);
+=======
+  const info = await transporter.sendMail({
+    from: `"StockTrack System" <${process.env.EMAIL_USER}>`,
+    to: ownerEmail,
+    subject: `🔔 Admin Access Request: ${admin.name} (${admin.email})`,
+    html,
+  });
+
+  console.log(`[MAILER] Approval email sent to ${ownerEmail}. Response: ${info.response}`);
+>>>>>>> 4aead95 (Fix: Penny Stocks, Common Lists, Overnight Analysis, and Market Sessions crash. Applied core data flow and session detection logic.)
 }

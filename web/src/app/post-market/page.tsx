@@ -50,7 +50,12 @@ export default function PostMarketPage() {
             const json = await res.json();
 
             if (json.movers) {
-                const sessionMovers = json.movers.filter((m: any) => m.session === 'Post-Market');
+                // Safe access to the list of movers
+                const allMovers = Array.isArray(json.movers.all)
+                    ? json.movers.all
+                    : (Array.isArray(json.movers) ? json.movers : []);
+
+                const sessionMovers = allMovers.filter((m: any) => m.session === 'Post-Market');
                 const uniqueTickers = Array.from(new Set(sessionMovers.map((m: any) => m.ticker))) as string[];
 
                 const tableData = uniqueTickers.map(ticker => {

@@ -51,7 +51,12 @@ export default function MarketSessionsPage() {
 
             if (json.movers) {
                 const processMovers = (session: string) => {
-                    const sessionMovers = json.movers.filter((m: any) => m.session === session);
+                    // Safe access to the list of movers
+                    const allMovers = Array.isArray(json.movers.all)
+                        ? json.movers.all
+                        : (Array.isArray(json.movers) ? json.movers : []);
+
+                    const sessionMovers = allMovers.filter((m: any) => m.session === session);
                     const uniqueTickers = Array.from(new Set(sessionMovers.map((m: any) => m.ticker))) as string[];
 
                     return uniqueTickers.map(ticker => {

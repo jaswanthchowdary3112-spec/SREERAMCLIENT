@@ -50,7 +50,12 @@ export default function PreMarketPage() {
             const json = await res.json();
 
             if (json.movers) {
-                const sessionMovers = json.movers.filter((m: any) => m.session === 'Pre-Market');
+                // Safe access to the list of movers
+                const allMovers = Array.isArray(json.movers.all)
+                    ? json.movers.all
+                    : (Array.isArray(json.movers) ? json.movers : []);
+
+                const sessionMovers = allMovers.filter((m: any) => m.session === 'Pre-Market');
                 const uniqueTickers = Array.from(new Set(sessionMovers.map((m: any) => m.ticker))) as string[];
 
                 const tableData = uniqueTickers.map(ticker => {
