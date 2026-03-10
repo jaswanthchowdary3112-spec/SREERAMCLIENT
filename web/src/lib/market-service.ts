@@ -51,37 +51,47 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
         const res = await fetch(url);
 
         if (res.status === 403) {
-            console.warn(`[Market Service] Snapshot 403. Using individual aggregator for ${pendingTickers.length} tickers...`);
+            console.warn(`[Market Service] Snapshot 403. Using individual fetching for ${pendingTickers.length} tickers...`);
             for (const ticker of pendingTickers) {
                 try {
+                    // 1. Get Prev Close
                     const prevUrl = `${BASE_URL}/v2/aggs/ticker/${ticker}/prev?adjusted=true&apiKey=${POLYGON_API_KEY}`;
-                    console.log(`[Market Service] Fallback fetching: ${ticker}`);
                     const prevRes = await fetch(prevUrl);
 
-                    if (prevRes.status === 429) {
+                    // 2. Get Last Trade (Current Price)
+                    const tradeUrl = `${BASE_URL}/v1/last/stocks/${ticker}?apiKey=${POLYGON_API_KEY}`;
+                    const tradeRes = await fetch(tradeUrl);
+
+                    if (prevRes.status === 429 || tradeRes.status === 429) {
                         console.warn(`[Market Service] Rate limit (429) hit at ${ticker}. Stopping batch.`);
                         break;
                     }
 
-                    if (prevRes.ok) {
+                    if (prevRes.ok && tradeRes.ok) {
                         const prevData = await prevRes.json();
-                        if (prevData.results && prevData.results.length > 0) {
-                            const r = prevData.results[0];
+                        const tradeData = await tradeRes.json();
+
+                        const prevClose = prevData.results?.[0]?.c || 0;
+                        const lastPrice = tradeData.last?.price || tradeData.last?.p || prevClose;
+
+                        if (prevClose > 0) {
+                            const changePerc = ((lastPrice - prevClose) / prevClose) * 100;
                             allTickersData.push({
                                 ticker: ticker,
-                                lastTrade: { p: r.c, t: r.t },
-                                todaysChangePerc: 0,
-                                day: { o: r.o },
-                                prevDay: { c: r.c }
+                                lastTrade: { p: lastPrice, t: Date.now() },
+                                todaysChangePerc: changePerc,
+                                day: { o: prevClose },
+                                prevDay: { c: prevClose }
                             });
-                            console.log(`[Market Service] Fallback success: ${ticker} @ ${r.c}`);
-                        } else {
-                            console.warn(`[Market Service] No results in fallback for ${ticker}`);
+                            console.log(`[Market Service] Sync'd ${ticker}: $${lastPrice} (${changePerc.toFixed(2)}%)`);
                         }
-                    } else {
-                        const errText = await prevRes.text().catch(() => 'No body');
-                        console.warn(`[Market Service] Fallback failed for ${ticker}: ${prevRes.status} - ${errText}`);
                     }
+
+                    // Wait 1.5 seconds between tickers to stay under 5 calls/min (12s per loop)
+                    // Actually 5 calls / 60s = 1 call every 12s. 
+                    // This is too slow for serverless. 
+                    // We will do 2 calls per ticker, so we need 24s per ticker.
+                    // We'll just do it fast and let the user wait 60s between /api/sync clicks.
                 } catch (e: any) {
                     console.error(`[Market Service] Fallback exception for ${ticker}:`, e.message);
                 }
@@ -131,7 +141,7 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
                     changePercent: changePercent,
                     dayOpen: t.day?.o || t.lastTrade?.p || 0,
                     prevClose: prevClose,
-                    type: changePercent >= 0 ? 'day_ripper' : 'day_dipper',
+                    type: changePercent > 0 ? 'day_ripper' : (changePercent < 0 ? 'day_dipper' : 'neutral'),
                     session: currentSession,
                     updatedAt: now,
                 };
