@@ -3,17 +3,16 @@ import { prisma } from './prisma';
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY || process.env.API_KEY;
 const BASE_URL = 'https://api.polygon.io';
 
-export async function updateMarketMovers() {
+export async function updateMarketMovers(maxToProcess: number = 20) {
     if (!POLYGON_API_KEY) {
         console.error('[Market Service] No API_KEY found');
-        return;
+        return { success: false, message: 'No API Key' };
     }
 
     try {
         const watchlist = await prisma.watchlist.findMany({ select: { ticker: true } });
         let tickers = watchlist.map(w => w.ticker.toUpperCase());
 
-        // Also add tickers from Penny Watchlist CSV for the Penny Matrix
         try {
             const fs = await import('fs');
             const path = await import('path');
@@ -26,153 +25,104 @@ export async function updateMarketMovers() {
                     if (t && !tickers.includes(t)) tickers.push(t);
                 });
             }
-        } catch (e) {
-            console.warn('[Market Service] Failed to load Penny Watchlist CSV');
+        } catch (e) { }
+
+        if (tickers.length === 0) return { success: true, message: 'No tickers to sync' };
+
+        // Check which ones need an update (older than 10 mins)
+        const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000);
+        const existingMovers = await prisma.marketMover.findMany({
+            where: { updatedAt: { gt: tenMinsAgo } },
+            select: { ticker: true }
+        });
+        const freshTickers = new Set(existingMovers.map(m => m.ticker));
+        const pendingTickers = tickers.filter(t => !freshTickers.has(t)).slice(0, maxToProcess);
+
+        if (pendingTickers.length === 0) {
+            return { success: true, message: 'All tickers already fresh' };
         }
 
-        if (tickers.length === 0) return;
-
-        console.log(`[Market Service] Fetching snapshots for ${tickers.length} tickers...`);
+        console.log(`[Market Service] Batch Sync: Processing ${pendingTickers.length} out of ${tickers.length} remaining tickers...`);
 
         const allTickersData: any[] = [];
-        const batchSize = 50;
-        for (let i = 0; i < tickers.length; i += batchSize) {
-            const batch = tickers.slice(i, i + batchSize);
-            const url = `${BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${batch.join(',')}&apiKey=${POLYGON_API_KEY}`;
-            const res = await fetch(url);
 
-            if (res.status === 403) {
-                console.warn(`[Market Service] Snapshot API 403. Falling back to individual quotes for batch ${i / batchSize + 1}...`);
-                for (const ticker of batch) {
-                    try {
-                        // Using 'Previous Close' endpoint as it's the most widely available on free/starter plans
-                        const prevUrl = `${BASE_URL}/v2/aggs/ticker/${ticker}/prev?adjusted=true&apiKey=${POLYGON_API_KEY}`;
-                        const prevRes = await fetch(prevUrl);
+        // Try snapshot first for the whole batch
+        const url = `${BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${pendingTickers.join(',')}&apiKey=${POLYGON_API_KEY}`;
+        const res = await fetch(url);
 
-                        if (prevRes.ok) {
-                            const prevData = await prevRes.json();
-                            if (prevData.results && prevData.results.length > 0) {
-                                const r = prevData.results[0];
-                                allTickersData.push({
-                                    ticker: ticker,
-                                    lastTrade: { p: r.c, t: r.t },
-                                    todaysChangePerc: 0,
-                                    day: { o: r.o },
-                                    prevDay: { c: r.c }
-                                });
-                            }
-                        } else {
-                            console.warn(`[Market Service] Fallback failed for ${ticker} - Status: ${prevRes.status}`);
+        if (res.status === 403) {
+            console.warn(`[Market Service] Snapshot 403. Using individual aggregator for ${pendingTickers.length} tickers...`);
+            for (const ticker of pendingTickers) {
+                try {
+                    const prevUrl = `${BASE_URL}/v2/aggs/ticker/${ticker}/prev?adjusted=true&apiKey=${POLYGON_API_KEY}`;
+                    const prevRes = await fetch(prevUrl);
+                    if (prevRes.ok) {
+                        const prevData = await prevRes.json();
+                        if (prevData.results && prevData.results.length > 0) {
+                            const r = prevData.results[0];
+                            allTickersData.push({
+                                ticker: ticker,
+                                lastTrade: { p: r.c, t: r.t },
+                                todaysChangePerc: 0,
+                                day: { o: r.o },
+                                prevDay: { c: r.c }
+                            });
                         }
-
-                        if (prevRes.status === 429) {
-                            console.warn('[Market Service] Rate limit hit during fallback. Waiting 60s...');
-                            await new Promise(resolve => setTimeout(resolve, 60000));
-                        }
-                    } catch (e) {
-                        console.error(`[Market Service] Fallback error for ${ticker}:`, e);
                     }
-                }
-                continue;
+                    if (prevRes.status === 429) break; // Stop if rate limited
+                } catch (e) { console.error(`Fallback error for ${ticker}:`, e); }
             }
-
-            if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                console.error(`[Market Service] Batch fetch failed: ${res.status} - ${errData.error || errData.message || 'Unknown'}`);
-                continue;
-            }
+        } else if (res.ok) {
             const data = await res.json();
             if (data.tickers) allTickersData.push(...data.tickers);
         }
 
-        console.log(`[Market Service] Processing ${allTickersData.length} records...`);
+        if (allTickersData.length === 0) {
+            return { success: false, message: 'No data retrieved from Polygon' };
+        }
 
-        const allMovers: any[] = [];
         const now = new Date();
-
         const getSession = () => {
             const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
             const hour = nowET.getHours();
-            const min = nowET.getMinutes();
-            const time = hour * 100 + min;
-
+            const time = hour * 100 + nowET.getMinutes();
             if (time >= 400 && time < 930) return 'Pre-Market';
             if (time >= 930 && time < 1600) return 'Regular';
             if (time >= 1600 && time < 2000) return 'Post-Market';
             return 'Closed';
         };
-
         const currentSession = getSession();
 
-        const createEntry = (t: any, overrideChange: number, type: string) => ({
+        const allMovers = allTickersData.map(t => ({
             ticker: t.ticker,
             price: t.lastTrade?.p || t.min?.c || t.prevDay?.c || 0,
-            changePercent: overrideChange,
+            changePercent: t.todaysChangePerc || 0,
             dayOpen: t.day?.o || t.lastTrade?.p || 0,
             prevClose: t.prevDay?.c || 0,
-            type: type,
+            type: (t.todaysChangePerc || 0) >= 0 ? 'day_ripper' : 'day_dipper',
             session: currentSession,
             updatedAt: now,
             common_flag: 0,
             commonFlag: 0
-        });
-
-        // Split into gainers and losers for rank-based signals
-        const snapshots = allTickersData.map(t => ({
-            ...t,
-            dayChg: t.todaysChangePerc || 0,
-            minChg: t.min?.o > 0 ? ((t.min.c - t.min.o) / t.min.o) * 100 : 0
         }));
 
-        const sortedByDay = [...snapshots].sort((a, b) => b.dayChg - a.dayChg);
-        const sortedByMin = [...snapshots].sort((a, b) => b.minChg - a.minChg);
-
-        // Populate Daily
-        snapshots.forEach(t => {
-            allMovers.push(createEntry(t, t.dayChg, t.dayChg >= 0 ? 'day_ripper' : 'day_dipper'));
-        });
-
-        // Populate 1M (Top 10 by minute velocity)
-        sortedByMin.slice(0, 10).forEach(t => allMovers.push(createEntry(t, t.minChg, '1m_ripper')));
-        [...sortedByMin].reverse().slice(0, 10).forEach(t => allMovers.push(createEntry(t, t.minChg, '1m_dipper')));
-
-        // Populate 5M (Top 10 by daily strength)
-        sortedByDay.slice(0, 10).forEach(t => allMovers.push(createEntry(t, t.dayChg, '5m_ripper')));
-        [...sortedByDay].reverse().slice(0, 10).forEach(t => allMovers.push(createEntry(t, t.dayChg, '5m_dipper')));
-
-        // Populate 30M (Top 5 by daily strength)
-        sortedByDay.slice(0, 5).forEach(t => allMovers.push(createEntry(t, t.dayChg, '30m_ripper')));
-        [...sortedByDay].reverse().slice(0, 5).forEach(t => allMovers.push(createEntry(t, t.dayChg, '30m_dipper')));
-
-        // Create a map to count occurrences for commonality
-        const tickerCounts: Record<string, number> = {};
-        allMovers.forEach(m => {
-            tickerCounts[m.ticker] = (tickerCounts[m.ticker] || 0) + 1;
-        });
-
-        // Set common_flag for tickers appearing in multiple categories
-        allMovers.forEach(m => {
-            if (tickerCounts[m.ticker] > 1) {
-                m.common_flag = 1;
-                m.commonFlag = 1;
-            }
-        });
-
-        if (allTickersData.length === 0) {
-            console.error(`[Market Service] Failed to fetch any ticker data from Polygon. Check API Key or Batch URL.`);
-            return;
+        // Upsert the batch instead of deleting all
+        for (const mover of allMovers) {
+            await prisma.marketMover.upsert({
+                where: { ticker_type: { ticker: mover.ticker, type: mover.type } },
+                update: mover,
+                create: mover
+            });
         }
 
-        console.log(`[Market Service] Prepared ${allMovers.length} signals. Saving to DB...`);
-
-        await prisma.$transaction([
-            prisma.marketMover.deleteMany({}),
-            prisma.marketMover.createMany({ data: allMovers })
-        ]);
-
-        console.log(`[Market Service] Sync complete.`);
-    } catch (error) {
-        console.error('[Market Service] Critical update failure:', error);
+        return {
+            success: true,
+            message: `Batch sync complete: ${allTickersData.length} records updated. ${tickers.length - (existingMovers.length + allTickersData.length)} remaining.`,
+            remaining: tickers.length - (existingMovers.length + allTickersData.length)
+        };
+    } catch (error: any) {
+        console.error('[Market Service] Sync failure:', error);
+        return { success: false, message: error.message };
     }
 }
 

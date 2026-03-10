@@ -6,11 +6,8 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
     try {
         console.log('[API Sync] Manual sync triggered');
-        await updateMarketMovers();
-        return NextResponse.json({
-            success: true,
-            message: 'Market data sync completed. Check /api/debug for record counts.'
-        });
+        const result = await updateMarketMovers(20); // Process 20 at a time to avoid timeout
+        return NextResponse.json(result);
     } catch (error: any) {
         console.error('[API Sync] Sync failed:', error.message);
         return NextResponse.json({
