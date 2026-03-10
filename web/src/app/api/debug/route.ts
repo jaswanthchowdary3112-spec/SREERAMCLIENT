@@ -61,7 +61,7 @@ export async function GET() {
                     diagnostics.polygon.status = 'FAILED';
                     diagnostics.polygon.statusCode = res.status;
                     diagnostics.polygon.error = errData.error || errData.message || JSON.stringify(errData) || 'Unauthorized/Forbidden';
-                    diagnostics.polygon.hint = res.status === 401 ? 'Check if API Key is correct' : (res.status === 403 ? 'Plan might not support Snapshot API' : 'Unknown');
+                    diagnostics.polygon.hint = res.status === 401 ? 'Check if API Key is correct' : (res.status === 403 ? 'Plan might not support Snapshot API. [Fallback Mode Ready in /api/sync]' : 'Unknown');
                 }
             } catch (e: any) {
                 diagnostics.polygon.status = 'ERROR';
