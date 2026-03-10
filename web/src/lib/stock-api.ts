@@ -142,6 +142,27 @@ async function fetchLiveQuotesInternal(tickers: string[]): Promise<Record<string
 
         await Promise.all(promises);
 
+        // --- DATABASE FALLBACK (For missed tickers) ---
+        const missingTickers = tickers.filter(t => !results[t]);
+        if (missingTickers.length > 0) {
+            console.log(`[Stock API] Falling back to DB for ${missingTickers.length} tickers...`);
+            const dbMovers = await prisma.marketMover.findMany({
+                where: { ticker: { in: missingTickers } }
+            });
+            dbMovers.forEach(m => {
+                if (!results[m.ticker]) {
+                    results[m.ticker] = {
+                        ticker: m.ticker,
+                        price: m.price || 0,
+                        change: m.change || 0,
+                        changePercent: m.changePercent || 0,
+                        prevClose: m.prevClose || 0,
+                        lastUpdated: m.updatedAt.getTime()
+                    };
+                }
+            });
+        }
+
     } catch (error) {
         console.error('Error fetching quotes from Polygon:', error);
     }
