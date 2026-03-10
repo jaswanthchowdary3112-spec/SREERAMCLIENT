@@ -114,29 +114,41 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
         };
         const currentSession = getSession();
 
-        const allMovers = allTickersData.map(t => ({
-            ticker: t.ticker,
-            price: t.lastTrade?.p || t.min?.c || t.prevDay?.c || 0,
-            changePercent: t.todaysChangePerc || 0,
-            dayOpen: t.day?.o || t.lastTrade?.p || 0,
-            prevClose: t.prevDay?.c || 0,
-            type: (t.todaysChangePerc || 0) >= 0 ? 'day_ripper' : 'day_dipper',
-            session: currentSession,
-            updatedAt: now,
-            common_flag: 0,
-            commonFlag: 0
-        }));
+        // Match and update each ticker
+        for (const t of allTickersData) {
+            const price = t.lastTrade?.p || t.min?.c || t.prevDay?.c || 0;
+            const prevClose = t.prevDay?.c || 0;
+            let changePercent = t.todaysChangePerc || 0;
 
-        // Upsert the batch instead of deleting all
-        for (const mover of allMovers) {
+            if (prevClose > 0) {
+                changePercent = ((price - prevClose) / prevClose) * 100;
+            }
+
+            const mover = {
+                ticker: t.ticker,
+                price: price,
+                changePercent: changePercent,
+                dayOpen: t.day?.o || t.lastTrade?.p || 0,
+                prevClose: prevClose,
+                type: changePercent >= 0 ? 'day_ripper' : 'day_dipper',
+                session: currentSession,
+                updatedAt: now,
+                common_flag: 0,
+                commonFlag: 0
+            };
+
             try {
-                await prisma.marketMover.upsert({
-                    where: { ticker_type: { ticker: mover.ticker, type: mover.type } },
-                    update: mover,
-                    create: mover
+                // To avoid having both ripper and dipper for one ticker:
+                // Delete any existing record for this ticker first.
+                await prisma.marketMover.deleteMany({
+                    where: { ticker: mover.ticker }
+                });
+
+                await prisma.marketMover.create({
+                    data: mover
                 });
             } catch (upsertErr: any) {
-                console.error(`[Market Service] Upsert failed for ${mover.ticker}:`, upsertErr.message);
+                console.error(`[Market Service] Sync failed for ${mover.ticker}:`, upsertErr.message);
             }
         }
 
