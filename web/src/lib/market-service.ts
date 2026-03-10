@@ -134,22 +134,28 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
                     type: changePercent >= 0 ? 'day_ripper' : 'day_dipper',
                     session: currentSession,
                     updatedAt: now,
-                    common_flag: 0,
-                    commonFlag: 0
+                };
+
+                const isCommon = ['AAPL', 'AMZN', 'GOOG', 'GOOGL', 'META', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'SPY', 'QQQ'].includes(mover.ticker);
+
+                const finalMover = {
+                    ...mover,
+                    commonFlag: isCommon ? 1 : 0,
+                    common_flag: isCommon ? 1 : 0
                 };
 
                 try {
+                    // To avoid having both ripper and dipper for one ticker:
                     // Delete any existing record for this ticker first.
                     await tx.marketMover.deleteMany({
-                        where: { ticker: mover.ticker }
+                        where: { ticker: finalMover.ticker }
                     });
 
-                    // Create the new mover record.
                     await tx.marketMover.create({
-                        data: mover
+                        data: finalMover
                     });
                 } catch (upsertErr: any) {
-                    console.error(`[Market Service] Transaction step failed for ${mover.ticker}:`, upsertErr.message);
+                    console.error(`[Market Service] Transaction step failed for ${finalMover.ticker}:`, upsertErr.message);
                 }
             }
         });

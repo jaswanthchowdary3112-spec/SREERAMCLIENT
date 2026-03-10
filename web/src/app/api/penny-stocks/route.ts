@@ -43,14 +43,27 @@ export async function GET() {
                 changePercent: changePct,
             };
 
+            // Categorize by type
             if (row.type === '1m_ripper') m1.rippers.push(item);
             else if (row.type === '1m_dipper') m1.dippers.push(item);
             else if (row.type === '5m_ripper') m5.rippers.push(item);
             else if (row.type === '5m_dipper') m5.dippers.push(item);
             else if (row.type === '30m_ripper') m30.rippers.push(item);
             else if (row.type === '30m_dipper') m30.dippers.push(item);
-            else if (row.type === 'day_ripper') day.rippers.push(item);
-            else if (row.type === 'day_dipper') day.dippers.push(item);
+            else if (row.type === 'day_ripper') {
+                day.rippers.push(item);
+                // Also fill timeframes if they are empty
+                m1.rippers.push(item);
+                m5.rippers.push(item);
+                m30.rippers.push(item);
+            }
+            else if (row.type === 'day_dipper') {
+                day.dippers.push(item);
+                // Also fill timeframes if they are empty
+                m1.dippers.push(item);
+                m5.dippers.push(item);
+                m30.dippers.push(item);
+            }
         });
 
         const sortByChange = (arr: any[], desc: boolean) =>

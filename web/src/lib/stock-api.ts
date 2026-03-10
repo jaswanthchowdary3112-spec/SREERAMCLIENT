@@ -102,49 +102,13 @@ async function fetchLiveQuotesInternal(tickers: string[]): Promise<Record<string
             })));
         }
 
-        // --- 3. FETCH STOCKS (Only missing ones) ---
+        // --- 3. FETCH STOCKS (DISABLED - Use /api/sync) ---
+        /* 
+           We disable live stock fetching here because the Free Tier (5 calls/min) 
+           is easily exhausted by page refreshes. Data should be populated via /api/sync.
+        */
         if (tickersToFetch.length > 0) {
-            if (globalThis.polygonSnapshotBlockedUntil && Date.now() < globalThis.polygonSnapshotBlockedUntil) {
-                console.warn(`[Stock API] Snapshot API suppressed until ${new Date(globalThis.polygonSnapshotBlockedUntil).toLocaleTimeString()}`);
-            } else {
-                const batchSize = 50;
-                for (let i = 0; i < tickersToFetch.length; i += batchSize) {
-                    const batch = tickersToFetch.slice(i, i + batchSize);
-                    promises.push((async () => {
-                        try {
-                            const tickerString = batch.join(',');
-                            const snapshotUrl = `${BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${tickerString}&apiKey=${POLYGON_API_KEY}`;
-                            const response = await fetchWithTimeout(snapshotUrl, 10000);
-
-                            if (response.status === 403) {
-                                console.warn('Polygon Snapshot 403. Suppressing.');
-                                globalThis.polygonSnapshotBlockedUntil = Date.now() + 10 * 60 * 1000;
-                                return;
-                            }
-
-                            if (response.ok) {
-                                const data = await response.json();
-                                if (data.tickers) {
-                                    data.tickers.forEach((t: any) => {
-                                        results[t.ticker] = {
-                                            ticker: t.ticker,
-                                            price: t.lastTrade?.p || t.min?.c || t.prevDay?.c || 0,
-                                            change: t.todaysChange || 0,
-                                            changePercent: t.todaysChangePerc || 0,
-                                            volume: t.day?.v || 0,
-                                            openPrice: t.day?.o || t.prevDay?.c || 0,
-                                            prevClose: t.prevDay?.c || 0,
-                                            lastUpdated: t.lastTrade?.t ? t.lastTrade.t / 1000000 : Date.now()
-                                        };
-                                    });
-                                }
-                            }
-                        } catch (err: any) {
-                            console.error(`Error fetching batch:`, err.message);
-                        }
-                    })());
-                }
-            }
+            console.log(`[Stock API] ${tickersToFetch.length} tickers not in DB. Showing 0 (Needs Sync).`);
         }
 
         await Promise.all(promises);

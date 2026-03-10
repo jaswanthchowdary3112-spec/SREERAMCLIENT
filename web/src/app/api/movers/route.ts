@@ -101,22 +101,25 @@ export async function GET(req: Request) {
                     prevClose: m.prevClose || 0
                 }
 
-                // Track update freshness
-                if (m.updatedAt) {
-                    const ts = new Date(m.updatedAt).getTime();
-                    if (!(global as any).lastMoverUpdate || ts > new Date((global as any).lastMoverUpdate).getTime()) {
-                        (global as any).lastMoverUpdate = m.updatedAt;
-                    }
+                if (m.type === "1m_ripper") m1.rippers.push(entry)
+                else if (m.type === "1m_dipper") m1.dippers.push(entry)
+                else if (m.type === "5m_ripper") m5.rippers.push(entry)
+                else if (m.type === "5m_dipper") m5.dippers.push(entry)
+                else if (m.type === "30m_ripper") m30.rippers.push(entry)
+                else if (m.type === "30m_dipper") m30.dippers.push(entry)
+                else if (m.type === "day_ripper") {
+                    day.rippers.push(entry);
+                    m1.rippers.push(entry);
+                    m5.rippers.push(entry);
+                    m30.rippers.push(entry);
+                }
+                else if (m.type === "day_dipper") {
+                    day.dippers.push(entry);
+                    m1.dippers.push(entry);
+                    m5.dippers.push(entry);
+                    m30.dippers.push(entry);
                 }
 
-                if (m.type === "1m_ripper") m1.rippers.push(entry)
-                if (m.type === "1m_dipper") m1.dippers.push(entry)
-                if (m.type === "5m_ripper") m5.rippers.push(entry)
-                if (m.type === "5m_dipper") m5.dippers.push(entry)
-                if (m.type === "30m_ripper") m30.rippers.push(entry)
-                if (m.type === "30m_dipper") m30.dippers.push(entry)
-                if (m.type === "day_ripper") day.rippers.push(entry)
-                if (m.type === "day_dipper") day.dippers.push(entry)
                 if (m.commonFlag === 1) common.push(entry)
             })
         } catch (e: any) {
