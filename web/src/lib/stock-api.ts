@@ -50,9 +50,33 @@ async function fetchLiveQuotesInternal(tickers: string[]): Promise<Record<string
         const cryptoTickers = tickers.filter(t => t.includes('-'));
         const stockTickers = tickers.filter(t => !t.includes('-'));
 
+        // --- 1. PRE-FETCH FROM DATABASE (Save Quota) ---
+        if (stockTickers.length > 0) {
+            const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000);
+            const dbMovers = await prisma.marketMover.findMany({
+                where: {
+                    ticker: { in: stockTickers },
+                    updatedAt: { gt: tenMinsAgo }
+                }
+            });
+
+            dbMovers.forEach(m => {
+                results[m.ticker] = {
+                    ticker: m.ticker,
+                    price: m.price || 0,
+                    change: m.change || 0,
+                    changePercent: m.changePercent || 0,
+                    prevClose: m.prevClose || 0,
+                    lastUpdated: m.updatedAt.getTime()
+                };
+            });
+            console.log(`[Stock API] DB found ${dbMovers.length}/${stockTickers.length} tickers.`);
+        }
+
+        const tickersToFetch = stockTickers.filter(t => !results[t]);
         const promises = [];
 
-        // --- FETCH CRYPTO (Parallel) ---
+        // --- 2. FETCH CRYPTO (Parallel) ---
         if (cryptoTickers.length > 0) {
             promises.push(Promise.allSettled(cryptoTickers.map(async (t) => {
                 try {
@@ -63,108 +87,70 @@ async function fetchLiveQuotesInternal(tickers: string[]): Promise<Record<string
                     if (res.ok) {
                         const data = await res.json();
                         if (data.last) {
-                            const price = data.last.price;
-
                             results[t] = {
                                 ticker: t,
-                                price: price,
+                                price: data.last.price,
                                 change: 0,
                                 changePercent: 0,
                                 lastUpdated: data.last.timestamp || Date.now()
                             };
-                            return;
                         }
                     }
                 } catch (e) {
-                    console.warn(`Timeout/Error fetching crypto ${t}, skipping`);
+                    console.warn(`Error fetching crypto ${t}`);
                 }
             })));
         }
 
-        // --- FETCH STOCKS (Parallel Batches) ---
-        if (stockTickers.length > 0) {
-            // Batch tickers to avoid URL length issues (max 50 per request)
-            const batchSize = 50;
-            const batches = [];
-            for (let i = 0; i < stockTickers.length; i += batchSize) {
-                batches.push(stockTickers.slice(i, i + batchSize));
-            }
+        // --- 3. FETCH STOCKS (Only missing ones) ---
+        if (tickersToFetch.length > 0) {
+            if (globalThis.polygonSnapshotBlockedUntil && Date.now() < globalThis.polygonSnapshotBlockedUntil) {
+                console.warn(`[Stock API] Snapshot API suppressed until ${new Date(globalThis.polygonSnapshotBlockedUntil).toLocaleTimeString()}`);
+            } else {
+                const batchSize = 50;
+                for (let i = 0; i < tickersToFetch.length; i += batchSize) {
+                    const batch = tickersToFetch.slice(i, i + batchSize);
+                    promises.push((async () => {
+                        try {
+                            const tickerString = batch.join(',');
+                            const snapshotUrl = `${BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${tickerString}&apiKey=${POLYGON_API_KEY}`;
+                            const response = await fetchWithTimeout(snapshotUrl, 10000);
 
-            promises.push(Promise.allSettled(batches.map(async (batch) => {
-                try {
-                    const tickerString = batch.join(',');
-                    const snapshotUrl = `${BASE_URL}/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${tickerString}&apiKey=${POLYGON_API_KEY}`;
-
-                    const response = await fetchWithTimeout(snapshotUrl, 10000);
-
-                    if (response.status === 403) {
-                        console.warn('Polygon Snapshot API 403 (Stock). Using DB fallback.');
-                        return;
-                    } else if (!response.ok) {
-                        console.warn(`Polygon Snapshot API failed with status: ${response.status}`);
-                        return;
-                    }
-
-                    const data = await response.json();
-                    if (data.tickers) {
-                        data.tickers.forEach((t: any) => {
-                            const price = t.lastTrade?.p || t.min?.c || t.prevDay?.c || 0;
-                            const prevClose = t.prevDay?.c || 0;
-                            let change = t.todaysChange || 0;
-                            let changePerc = t.todaysChangePerc || 0;
-
-                            if ((change === 0) && prevClose > 0 && price > 0) {
-                                change = price - prevClose;
-                                changePerc = (change / prevClose) * 100;
+                            if (response.status === 403) {
+                                console.warn('Polygon Snapshot 403. Suppressing.');
+                                globalThis.polygonSnapshotBlockedUntil = Date.now() + 10 * 60 * 1000;
+                                return;
                             }
 
-                            results[t.ticker] = {
-                                ticker: t.ticker,
-                                price: price,
-                                change: change,
-                                changePercent: changePerc,
-                                volume: t.day?.v || 0,
-                                openPrice: t.day?.o || prevClose || 0,
-                                prevClose: prevClose,
-                                lastUpdated: t.lastTrade?.t ? t.lastTrade.t / 1000000 : Date.now()
-                            };
-                        });
-                    }
-                } catch (err: any) {
-                    if (err.name === 'AbortError') {
-                        console.warn(`Polygon API timeout for batch, skipping`);
-                    } else {
-                        console.error(`Error fetching batch:`, err.message);
-                    }
+                            if (response.ok) {
+                                const data = await response.json();
+                                if (data.tickers) {
+                                    data.tickers.forEach((t: any) => {
+                                        results[t.ticker] = {
+                                            ticker: t.ticker,
+                                            price: t.lastTrade?.p || t.min?.c || t.prevDay?.c || 0,
+                                            change: t.todaysChange || 0,
+                                            changePercent: t.todaysChangePerc || 0,
+                                            volume: t.day?.v || 0,
+                                            openPrice: t.day?.o || t.prevDay?.c || 0,
+                                            prevClose: t.prevDay?.c || 0,
+                                            lastUpdated: t.lastTrade?.t ? t.lastTrade.t / 1000000 : Date.now()
+                                        };
+                                    });
+                                }
+                            }
+                        } catch (err: any) {
+                            console.error(`Error fetching batch:`, err.message);
+                        }
+                    })());
                 }
-            })));
+            }
         }
 
         await Promise.all(promises);
 
-        // --- DATABASE FALLBACK (For missed tickers) ---
-        const missingTickers = tickers.filter(t => !results[t]);
-        if (missingTickers.length > 0) {
-            console.log(`[Stock API] Falling back to DB for ${missingTickers.length} tickers...`);
-            const dbMovers = await prisma.marketMover.findMany({
-                where: { ticker: { in: missingTickers } }
-            });
-            dbMovers.forEach(m => {
-                if (!results[m.ticker]) {
-                    results[m.ticker] = {
-                        ticker: m.ticker,
-                        price: m.price || 0,
-                        change: m.change || 0,
-                        changePercent: m.changePercent || 0,
-                        prevClose: m.prevClose || 0,
-                        lastUpdated: m.updatedAt.getTime()
-                    };
-                }
-            });
-        }
-
     } catch (error) {
-        console.error('Error fetching quotes from Polygon:', error);
+        console.error('Error in fetchLiveQuotesInternal:', error);
     }
 
     return results;
@@ -176,10 +162,11 @@ interface QuotesCache {
 }
 declare global {
     var quotesCache: QuotesCache | undefined;
+    var polygonSnapshotBlockedUntil: number | undefined;
 }
 
 export async function getLiveQuotes(tickers: string[]): Promise<Record<string, LiveQuote>> {
-    const CACHE_DURATION = 1000; // 1 second
+    const CACHE_DURATION = 60000; // 60 seconds (Save Quota)
     const now = Date.now();
 
     // Simple cache check
