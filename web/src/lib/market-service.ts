@@ -96,7 +96,10 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
         }
 
         if (allTickersData.length === 0) {
-            return { success: false, message: 'No data retrieved from Polygon' };
+            return {
+                success: false,
+                message: 'No data retrieved. You are likely being RATE LIMITED by Polygon (5 calls/min). Please wait 60 seconds and try again.'
+            };
         }
 
         const now = new Date();
@@ -149,15 +152,7 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
 }
 
 export async function ensureMoversAreFresh() {
-    const UPDATE_THRESHOLD_MS = 60000; // 1 minute
-    try {
-        const lastMover = await prisma.marketMover.findFirst({ orderBy: { updatedAt: 'desc' } });
-        const now = new Date();
-        if (!lastMover || (now.getTime() - new Date(lastMover.updatedAt).getTime() > UPDATE_THRESHOLD_MS)) {
-            console.log('[Market Service] Triggering on-demand refresh...');
-            await updateMarketMovers();
-        }
-    } catch (error) {
-        console.error('[Market Service] Freshness check failed:', error);
-    }
+    // Disabled in Production to prevent Rate Limit (429) storm
+    // Manual sync via /api/sync is preferred for Polygon Free Tier
+    return;
 }
