@@ -84,12 +84,18 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
                                 prevDay: { c: prevClose }
                             });
                             console.log(`[Market Service] Sync'd ${ticker}: $${lastPrice} (${changePerc.toFixed(2)}%)`);
+                        } else {
+                            console.warn(`[Market Service] ${ticker} skipped: No previous close found.`);
                         }
+                    } else {
+                        console.warn(`[Market Service] ${ticker} failed: Prev=${prevRes.status}, Trade=${tradeRes.status}`);
+                        if (!prevRes.ok) console.warn(`   Prev Error: ${await prevRes.text().catch(() => 'N/A')}`);
+                        if (!tradeRes.ok) console.warn(`   Trade Error: ${await tradeRes.text().catch(() => 'N/A')}`);
                     }
 
                     // Wait 1.5 seconds between tickers to stay under 5 calls/min (12s per loop)
-                    // Actually 5 calls / 60s = 1 call every 12s. 
-                    // This is too slow for serverless. 
+                    // Actually 5 calls / 60s = 1 call every 12s.
+                    // This is too slow for serverless.
                     // We will do 2 calls per ticker, so we need 24s per ticker.
                     // We'll just do it fast and let the user wait 60s between /api/sync clicks.
                 } catch (e: any) {
