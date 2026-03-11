@@ -42,7 +42,7 @@ export default function RegisterPage() {
                     name: name.trim() || email.split('@')[0],
                     email: email.toLowerCase().trim(),
                     password,
-                    role: 'user'
+                    role: 'admin'
                 }),
             });
 
