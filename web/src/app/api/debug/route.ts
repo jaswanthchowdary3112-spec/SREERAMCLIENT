@@ -46,6 +46,12 @@ export async function GET() {
         };
         diagnostics.database.lastUpdate = lastMover?.updatedAt || null;
 
+        // Sample data for auditing
+        diagnostics.database.sampleMovers = await prisma.marketMover.findMany({
+            take: 10,
+            orderBy: { updatedAt: 'desc' }
+        });
+
         // TEST POLYGON API
         if (process.env.POLYGON_API_KEY) {
             diagnostics.polygon = { status: 'testing', error: null };
