@@ -36,7 +36,19 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
             select: { ticker: true }
         });
         const freshTickers = new Set(existingMovers.map(m => m.ticker));
-        const pendingTickers = tickers.filter(t => !freshTickers.has(t)).slice(0, maxToProcess);
+        let pendingTickers = tickers.filter(t => !freshTickers.has(t));
+
+        // PRIORITIZATION: Prioritize "Common" and "Penny" tickers
+        const commonPriority = ['AAPL', 'AMZN', 'GOOG', 'GOOGL', 'META', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'SPY', 'QQQ', 'BTC-USD', 'ETH-USD'];
+
+        pendingTickers.sort((a, b) => {
+            const aIsCommon = commonPriority.includes(a) ? 1 : 0;
+            const bIsCommon = commonPriority.includes(b) ? 1 : 0;
+            return bIsCommon - aIsCommon;
+        });
+
+        // Limit the batch
+        pendingTickers = pendingTickers.slice(0, maxToProcess);
 
         if (pendingTickers.length === 0) {
             return { success: true, message: 'All tickers already fresh' };
