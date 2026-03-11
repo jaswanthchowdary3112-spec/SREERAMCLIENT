@@ -39,11 +39,14 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
         let pendingTickers = tickers.filter(t => !freshTickers.has(t));
 
         // PRIORITIZATION: Prioritize "Common" and "Penny" tickers
-        const commonPriority = ['AAPL', 'AMZN', 'GOOG', 'GOOGL', 'META', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'SPY', 'QQQ', 'BTC-USD', 'ETH-USD'];
+        const commonPriority = ['AAPL', 'AMZN', 'GOOG', 'GOOGL', 'META', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'SPY', 'QQQ', 'BTC-USD', 'ETH-USD', 'BTC', 'ETH'];
 
         pendingTickers.sort((a, b) => {
-            const aIsCommon = commonPriority.includes(a) ? 1 : 0;
-            const bIsCommon = commonPriority.includes(b) ? 1 : 0;
+            const aNorm = (['BTC', 'ETH'].includes(a) ? `${a}-USD` : a);
+            const bNorm = (['BTC', 'ETH'].includes(b) ? `${b}-USD` : b);
+            
+            const aIsCommon = commonPriority.includes(aNorm) || commonPriority.includes(a) ? 1 : 0;
+            const bIsCommon = commonPriority.includes(bNorm) || commonPriority.includes(b) ? 1 : 0;
             return bIsCommon - aIsCommon;
         });
 
@@ -156,21 +159,7 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
                         where: { ticker: t.ticker },
                         data: { updatedAt: now }
                     });
-                    
-                    // If doesn't exist at all, create an empty one so it counts as "fresh" for 10 mins
-                    const exists = await tx.marketMover.count({ where: { ticker: t.ticker } });
-                    if (exists === 0) {
-                        await tx.marketMover.create({
-                            data: {
-                                ticker: t.ticker,
-                                price: 0,
-                                changePercent: 0,
-                                updatedAt: now,
-                                type: 'neutral',
-                                session: currentSession
-                            }
-                        });
-                    }
+                    // DO NOT create 0-price records if they don't exist
                     continue;
                 }
 
@@ -185,7 +174,7 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
                     updatedAt: now,
                 };
 
-                const isCommon = ['AAPL', 'AMZN', 'GOOG', 'GOOGL', 'META', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'SPY', 'QQQ'].includes(mover.ticker);
+                const isCommon = ['AAPL', 'AMZN', 'GOOG', 'GOOGL', 'META', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'SPY', 'QQQ', 'BTC', 'ETH', 'BTC-USD', 'ETH-USD'].includes(mover.ticker.toUpperCase());
 
                 const finalMover = {
                     ...mover,
