@@ -58,51 +58,70 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
 
         const allTickersData: any[] = [];
 
-        console.log(`[Market Service] Using individual fetching for ${pendingTickers.length} tickers to avoid Snapshot 403...`);
+        console.log(`[Market Service] Using individual fetching for ${pendingTickers.length} tickers...`);
         for (const ticker of pendingTickers) {
             try {
-                // 1. Get Prev Close
-                const prevUrl = `${BASE_URL}/v2/aggs/ticker/${ticker}/prev?adjusted=true&apiKey=${POLYGON_API_KEY}`;
-                const prevRes = await fetch(prevUrl);
+                const isCrypto = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE'].includes(ticker) || ticker.includes('-USD');
+                const normTicker = (isCrypto && !ticker.includes('-')) ? `${ticker}-USD` : ticker;
 
-                // 2. Get Last Trade (Current Price)
-                const tradeUrl = `${BASE_URL}/v1/last/stocks/${ticker}?apiKey=${POLYGON_API_KEY}`;
-                const tradeRes = await fetch(tradeUrl);
-
-                if (prevRes.status === 429 || tradeRes.status === 429) {
-                    console.warn(`[Market Service] Rate limit (429) hit at ${ticker}. Stopping batch.`);
-                    break;
+                // 1. Get Prev Close (Stocks Only for now, Polygon Free Aggs for Crypto is tricky)
+                let prevClose = 0;
+                if (!isCrypto) {
+                    const prevUrl = `${BASE_URL}/v2/aggs/ticker/${normTicker}/prev?adjusted=true&apiKey=${POLYGON_API_KEY}`;
+                    const prevRes = await fetch(prevUrl);
+                    if (prevRes.ok) {
+                        const prevData = await prevRes.json();
+                        prevClose = prevData.results?.[0]?.c || 0;
+                    }
                 }
-
-                if (prevRes.ok) {
-                    const prevData = await prevRes.json();
-                    const prevClose = prevData.results?.[0]?.c || 0;
-
-                    let lastPrice = 0;
+                
+                // 2. Get Last Trade (Current Price)
+                let lastPrice = 0;
+                let tradeRes;
+                if (isCrypto) {
+                    const [base, quote] = normTicker.split('-');
+                    const tradeUrl = `${BASE_URL}/v1/last/crypto/${base}/${quote}?apiKey=${POLYGON_API_KEY}`;
+                    tradeRes = await fetch(tradeUrl);
+                    if (tradeRes.ok) {
+                        const tradeData = await tradeRes.json();
+                        lastPrice = tradeData.last?.price || 0;
+                        if (prevClose === 0) prevClose = lastPrice; // Crypto fallback
+                    }
+                } else {
+                    const tradeUrl = `${BASE_URL}/v1/last/stocks/${normTicker}?apiKey=${POLYGON_API_KEY}`;
+                    tradeRes = await fetch(tradeUrl);
                     if (tradeRes.ok) {
                         const tradeData = await tradeRes.json();
                         lastPrice = tradeData.last?.price || tradeData.last?.p || 0;
                     }
+                }
 
-                    // Fallback to previous close if current price is missing
-                    if (lastPrice === 0) lastPrice = prevClose;
+                if (tradeRes?.status === 429) {
+                    console.warn(`[Market Service] Rate limit (429) hit at ${ticker}. Stopping batch.`);
+                    break;
+                }
 
-                    if (lastPrice > 0) {
-                        const changePerc = prevClose > 0 ? ((lastPrice - prevClose) / prevClose) * 100 : 0;
-
-                        allTickersData.push({
-                            ticker: ticker,
-                            lastTrade: { p: lastPrice, t: Date.now() },
-                            todaysChangePerc: changePerc,
-                            day: { o: prevClose },
-                            prevDay: { c: prevClose }
-                        });
-                        console.log(`[Market Service] Sync'd ${ticker}: $${lastPrice} (${changePerc.toFixed(2)}%)`);
-                    } else {
-                        console.warn(`[Market Service] ${ticker} skipped: No price found anywhere.`);
-                    }
+                // ONLY UPDATE IF WE FOUND A REAL PRICE (> 0)
+                if (lastPrice > 0) {
+                    // Calculate change ONLY if we have a valid prevClose that isn't the same as lastPrice
+                    // If we don't have a valid prevClose, we keep the price but 0% change
+                    const changePerc = (prevClose > 0 && prevClose !== lastPrice) ? ((lastPrice - prevClose) / prevClose) * 100 : 0;
+                    
+                    allTickersData.push({
+                        ticker: ticker, // Keep original ticker for DB lookup
+                        price: lastPrice,
+                        changePerc: changePerc,
+                        prevClose: prevClose > 0 ? prevClose : lastPrice,
+                        dayOpen: prevClose > 0 ? prevClose : lastPrice
+                    });
+                    console.log(`[Market Service] Sync'd ${ticker}: $${lastPrice} (${changePerc.toFixed(2)}%)`);
                 } else {
-                    console.warn(`[Market Service] ${ticker} failed: Prev Agg status ${prevRes.status}`);
+                    // Even if we skip the data update, we create a "heartbeat" to move the sync forward
+                    allTickersData.push({
+                        ticker: ticker,
+                        isHeartbeat: true
+                    });
+                    console.warn(`[Market Service] ${ticker} no price data found. Skipping but touching heartbeat.`);
                 }
             } catch (e: any) {
                 console.error(`[Market Service] Exception for ${ticker}:`, e.message);
@@ -131,21 +150,37 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
         // Match and update each ticker in a single transaction
         await prisma.$transaction(async (tx) => {
             for (const t of allTickersData) {
-                const price = t.lastTrade?.p || t.min?.c || t.prevDay?.c || 0;
-                const prevClose = t.prevDay?.c || 0;
-                let changePercent = t.todaysChangePerc || 0;
-
-                if (prevClose > 0) {
-                    changePercent = ((price - prevClose) / prevClose) * 100;
+                if (t.isHeartbeat) {
+                    // Just touch the updatedAt for tickers we couldn't fetch
+                    await tx.marketMover.updateMany({
+                        where: { ticker: t.ticker },
+                        data: { updatedAt: now }
+                    });
+                    
+                    // If doesn't exist at all, create an empty one so it counts as "fresh" for 10 mins
+                    const exists = await tx.marketMover.count({ where: { ticker: t.ticker } });
+                    if (exists === 0) {
+                        await tx.marketMover.create({
+                            data: {
+                                ticker: t.ticker,
+                                price: 0,
+                                changePercent: 0,
+                                updatedAt: now,
+                                type: 'neutral',
+                                session: currentSession
+                            }
+                        });
+                    }
+                    continue;
                 }
 
                 const mover = {
                     ticker: t.ticker,
-                    price: price,
-                    changePercent: changePercent,
-                    dayOpen: t.day?.o || t.lastTrade?.p || 0,
-                    prevClose: prevClose,
-                    type: changePercent > 0 ? 'day_ripper' : (changePercent < 0 ? 'day_dipper' : 'neutral'),
+                    price: t.price,
+                    changePercent: t.changePerc,
+                    dayOpen: t.dayOpen,
+                    prevClose: t.prevClose,
+                    type: t.changePerc > 0 ? 'day_ripper' : (t.changePerc < 0 ? 'day_dipper' : 'neutral'),
                     session: currentSession,
                     updatedAt: now,
                 };
@@ -159,8 +194,6 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
                 };
 
                 try {
-                    // To avoid having both ripper and dipper for one ticker:
-                    // Delete any existing record for this ticker first.
                     await tx.marketMover.deleteMany({
                         where: { ticker: finalMover.ticker }
                     });
