@@ -163,18 +163,21 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
                     continue;
                 }
 
+                const isCommon = ['AAPL', 'AMZN', 'GOOG', 'GOOGL', 'META', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'SPY', 'QQQ', 'BTC', 'ETH', 'BTC-USD', 'ETH-USD', 'COIN', 'NFLX', 'PYPL', 'ADBE'].includes(t.ticker.toUpperCase());
+
                 const mover = {
                     ticker: t.ticker,
                     price: t.price,
                     changePercent: t.changePerc,
                     dayOpen: t.dayOpen,
                     prevClose: t.prevClose,
-                    type: t.changePerc > 0 ? 'day_ripper' : (t.changePerc < 0 ? 'day_dipper' : 'neutral'),
+                    // Priority Visibility: If common stock, force into ripper/dipper lists even if 0% change
+                    type: isCommon 
+                        ? (t.changePerc >= 0 ? 'day_ripper' : 'day_dipper')
+                        : (t.changePerc > 0 ? 'day_ripper' : (t.changePerc < 0 ? 'day_dipper' : 'neutral')),
                     session: currentSession,
                     updatedAt: now,
                 };
-
-                const isCommon = ['AAPL', 'AMZN', 'GOOG', 'GOOGL', 'META', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'SPY', 'QQQ', 'BTC', 'ETH', 'BTC-USD', 'ETH-USD'].includes(mover.ticker.toUpperCase());
 
                 const finalMover = {
                     ...mover,

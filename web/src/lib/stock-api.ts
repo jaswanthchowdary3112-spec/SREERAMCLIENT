@@ -47,15 +47,16 @@ async function fetchLiveQuotesInternal(tickers: string[]): Promise<Record<string
     }
 
     try {
-        const cryptoTickers = tickers.filter(t => t.includes('-'));
-        const stockTickers = tickers.filter(t => !t.includes('-'));
+        const isCrypto = (t: string) => ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE'].includes(t.toUpperCase()) || t.includes('-');
+        const cryptoTickers = tickers.filter(t => isCrypto(t));
+        const stockTickers = tickers.filter(t => !isCrypto(t));
 
         // --- 1. PRE-FETCH FROM DATABASE (Save Quota) ---
-        if (stockTickers.length > 0) {
+        if (tickers.length > 0) {
             const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000);
             const dbMovers = await prisma.marketMover.findMany({
                 where: {
-                    ticker: { in: stockTickers },
+                    ticker: { in: tickers },
                     updatedAt: { gt: tenMinsAgo }
                 }
             });
@@ -64,17 +65,17 @@ async function fetchLiveQuotesInternal(tickers: string[]): Promise<Record<string
                 results[m.ticker] = {
                     ticker: m.ticker,
                     price: m.price || 0,
-                    change: m.change || 0,
+                    change: m.changePercent || 0,
                     changePercent: m.changePercent || 0,
                     prevClose: m.prevClose || 0,
                     lastUpdated: m.updatedAt.getTime()
                 };
             });
-            console.log(`[Stock API] DB found ${dbMovers.length}/${stockTickers.length} tickers.`);
+            console.log(`[Stock API] DB found ${dbMovers.length}/${tickers.length} tickers.`);
         }
 
         const tickersToFetch = stockTickers.filter(t => !results[t]);
-        const promises = [];
+        const promises: Promise<any>[] = [];
 
         // --- 2. FETCH CRYPTO (DISABLED - Use /api/sync) ---
         /*
