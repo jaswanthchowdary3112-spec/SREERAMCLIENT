@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
     Mail, Lock, User, TrendingUp, ArrowLeft, Clock, CheckCircle, XCircle
@@ -63,7 +63,31 @@ export default function RegisterPage() {
         }
     };
 
-    // --- Pending Approval Screen ---
+    // --- Polling for status ---
+    const [isApproved, setIsApproved] = useState(false);
+    
+    useEffect(() => {
+        if (status === 'pending') {
+            const interval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/auth/status?email=${encodeURIComponent(email)}`);
+                    const data = await res.json();
+                    if (data.status === 'approved') {
+                        setIsApproved(true);
+                        clearInterval(interval);
+                        setTimeout(() => {
+                            router.push('/admin-login');
+                        }, 2000);
+                    }
+                } catch (e) {
+                    console.error("Polling error:", e);
+                }
+            }, 5000);
+            return () => clearInterval(interval);
+        }
+    }, [status, email, router]);
+
+    // Registration successful — show pending approval screen
     if (status === 'pending') {
         return (
             <div className={s.loginContainer}>
@@ -92,21 +116,25 @@ export default function RegisterPage() {
                             <div style={{
                                 width: '72px', height: '72px',
                                 borderRadius: '50%',
-                                background: '#fef3c7',
-                                border: '3px solid #fde68a',
+                                background: isApproved ? '#f0fdf4' : '#fef3c7',
+                                border: `3px solid ${isApproved ? '#bbf7d0' : '#fde68a'}`,
                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                                 margin: '0 auto 24px'
                             }}>
-                                <Clock size={36} color="#f59e0b" />
+                                {isApproved ? <CheckCircle size={36} color="#16a34a" /> : <Clock size={36} color="#f59e0b" />}
                             </div>
 
                             <h2 style={{ color: '#0f172a', fontSize: '22px', fontWeight: 700, margin: '0 0 12px' }}>
-                                Awaiting Approval
+                                {isApproved ? 'Access Granted!' : 'Awaiting Approval'}
                             </h2>
                             <p style={{ color: '#64748b', fontSize: '14px', lineHeight: 1.7, margin: '0 0 28px' }}>
-                                Your account has been created successfully!<br />
-                                An approval request has been sent to the <strong>system owner</strong>.<br />
-                                You will receive access once your request is approved.
+                                {isApproved ? (
+                                    <>Your account has been approved!<br />Redirecting you to login...</>
+                                ) : (
+                                    <>Your account has been created successfully!<br />
+                                    An approval request has been sent to the <strong>system owner</strong>.<br />
+                                    You will receive access once your request is approved.</>
+                                )}
                             </p>
 
                             <div style={{
@@ -126,27 +154,29 @@ export default function RegisterPage() {
                                     <span style={{ color: '#475569', fontSize: '13px' }}>Approval email sent to owner</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                    <Clock size={16} color="#f59e0b" />
-                                    <span style={{ color: '#475569', fontSize: '13px' }}>Waiting for owner approval…</span>
+                                    {isApproved ? <CheckCircle size={16} color="#16a34a" /> : <Clock size={16} color="#f59e0b" />}
+                                    <span style={{ color: '#475569', fontSize: '13px' }}>{isApproved ? 'Approved by owner' : 'Waiting for owner approval…'}</span>
                                 </div>
                             </div>
 
-                            <button
-                                onClick={() => router.push('/login')}
-                                style={{
-                                    width: '100%',
-                                    padding: '13px',
-                                    background: 'linear-gradient(135deg, #1e293b, #0f172a)',
-                                    color: '#fff',
-                                    border: 'none',
-                                    borderRadius: '10px',
-                                    fontWeight: 700,
-                                    fontSize: '14px',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                Back to Login
-                            </button>
+                            {!isApproved && (
+                                <button
+                                    onClick={() => router.push('/admin-login')}
+                                    style={{
+                                        width: '100%',
+                                        padding: '13px',
+                                        background: 'linear-gradient(135deg, #1e293b, #0f172a)',
+                                        color: '#fff',
+                                        border: 'none',
+                                        borderRadius: '10px',
+                                        fontWeight: 700,
+                                        fontSize: '14px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Back to Login
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
