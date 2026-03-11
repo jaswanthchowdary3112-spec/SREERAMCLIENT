@@ -278,8 +278,8 @@ export async function updateMarketMovers(maxToProcess: number = 20, force: boole
                         ticker: ticker,
                         price: 0.0001, // Store a tiny fraction so it counts as initialized
                         changePerc: 0,
-                        prevClose: 0,
-                        dayOpen: 0
+                        prevClose: 0.0001,
+                        dayOpen: 0.0001
                     });
                 }
             } catch (e: any) {
@@ -323,8 +323,8 @@ export async function updateMarketMovers(maxToProcess: number = 20, force: boole
                     ticker: t.ticker,
                     price: t.price || 0.0001,
                     changePercent: t.changePerc || 0,
-                    dayOpen: t.dayOpen || 0,
-                    prevClose: t.prevClose || 0,
+                    dayOpen: t.dayOpen || 0.0001,
+                    prevClose: t.prevClose || 0.0001,
                     type: isCommon 
                         ? (t.changePerc >= 0 ? 'day_ripper' : 'day_dipper')
                         : (t.changePerc > 0 ? 'day_ripper' : (t.changePerc < 0 ? 'day_dipper' : 'neutral')),
