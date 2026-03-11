@@ -92,7 +92,30 @@ export async function updateMarketMovers(maxToProcess: number = 20, force: boole
                     if (t && !tickers.includes(t)) tickers.push(t);
                 });
             }
+
+            // Also include legacy Watchlist_New.csv
+            const legacyPaths = [
+                path.join(process.cwd(), '../Watchlist_New.csv'),
+                path.join(process.cwd(), 'public/Watchlist_New.csv'),
+                path.join(process.cwd(), 'Watchlist_New.csv'),
+                path.join(process.cwd(), '.next/server/public/Watchlist_New.csv')
+            ];
+            let legacyContent = null;
+            for (const p of legacyPaths) {
+                if (fs.existsSync(p)) {
+                    legacyContent = fs.readFileSync(p, 'utf-8');
+                    break;
+                }
+            }
+            if (legacyContent) {
+                const lines = legacyContent.split('\n').filter(l => l.trim().length > 0).slice(1);
+                lines.forEach(line => {
+                    const t = line.split(',')[1]?.trim().toUpperCase();
+                    if (t && !tickers.includes(t)) tickers.push(t);
+                });
+            }
         } catch (e) { }
+
 
         if (tickers.length === 0) return { success: true, message: 'No tickers to sync' };
 
