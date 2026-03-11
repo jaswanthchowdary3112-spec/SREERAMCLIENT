@@ -32,16 +32,20 @@ export async function GET() {
         moversRows.forEach(row => {
             if (!tickerSet.has(row.ticker)) return;
 
-            const changePct = row.changePercent || 0;
             const price = row.price || 0;
-            const change = row.change || 0;
+            let finalChange = row.changePercent || 0;
+            // LIVE RECALCULATION: If 0 but we have price + baseline
+            if (Math.abs(finalChange) < 0.0001 && price > 0 && (row.prevClose || row.dayOpen || 0) > 0) {
+                const baseline = row.dayOpen || row.prevClose;
+                finalChange = ((price - baseline) / baseline) * 100;
+            }
 
             const item = {
                 ticker: row.ticker,
                 price: price,
-                change: change,
-                changePercent: changePct,
-                openPrice: row.dayOpen || row.price || 0,
+                change: finalChange,
+                changePercent: finalChange,
+                openPrice: row.dayOpen || row.prevClose || row.price || 0,
                 prevClose: row.prevClose || 0
             };
 

@@ -1,20 +1,24 @@
-async function check() {
-    const ticker = 'AAPL';
-    const url = `https://www.cnbc.com/quotes/${ticker}`;
-    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+const fetch = require('node-fetch');
+
+async function test() {
+    const ticker = process.argv[2] || 'AAPL';
+    console.log(`Testing ticker: ${ticker}`);
+    const res = await fetch(`https://www.cnbc.com/quotes/${ticker}`);
     const html = await res.text();
     
-    // Find EVERY string that looks like "key": value
-    const regex = /"([^"]+)"\s*:\s*([^,}]+)/g;
-    let match;
-    const results = [];
-    while ((match = regex.exec(html)) !== null) {
-        const key = match[1];
-        const val = match[2];
-        if (key.toLowerCase().includes('close') || key.toLowerCase().includes('open') || key.toLowerCase().includes('price')) {
-            results.push({ key, val });
+    const keys = ['open', 'previous_close', 'closePrice', 'price', 'last', 'low', 'high', 'priceChangePercent'];
+    keys.forEach(k => {
+        const regex = new RegExp(`"${k}"\\s*:\\s*"?([^",}]+)"?`, 'g');
+        let match;
+        console.log(`Searching for: ${k}`);
+        while ((match = regex.exec(html)) !== null) {
+            console.log(`  Found: ${match[0]}`);
         }
+    });
+
+    // Also look for common JSON patterns
+    if (html.includes('__NEXT_DATA__')) {
+        console.log('Found __NEXT_DATA__');
     }
-    console.log(JSON.stringify(results.slice(0, 100), null, 2));
 }
-check();
+test();

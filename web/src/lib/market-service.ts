@@ -5,7 +5,6 @@ const BASE_URL = 'https://api.polygon.io';
 
 async function scrapeCNBC(ticker: string): Promise<{ price: number, changePercent: number, open: number, prevClose: number }> {
     try {
-        const isCrypto = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE'].includes(ticker.toUpperCase()) || ticker.includes('-USD');
         let url = `https://www.cnbc.com/quotes/${ticker}`;
         if (ticker.toUpperCase() === 'BTC' || ticker.toUpperCase() === 'BTC-USD') url = "https://www.cnbc.com/quotes/BTC.CM=";
         if (ticker.toUpperCase() === 'ETH' || ticker.toUpperCase() === 'ETH-USD') url = "https://www.cnbc.com/quotes/ETH.CM=";
@@ -17,18 +16,31 @@ async function scrapeCNBC(ticker: string): Promise<{ price: number, changePercen
         if (!res.ok) return { price: 0, changePercent: 0, open: 0, prevClose: 0 };
         const html = await res.text();
         
-        const priceMatch = html.match(/"price"\s*:\s*"([^"]+)"/);
-        const changePctMatch = html.match(/"priceChangePercent"\s*:\s*"([^"]+)"/);
-        const openMatch = html.match(/"open"\s*:\s*"([^"]+)"/);
-        // Look for closePrice OR previous_close
-        const prevCloseMatch = html.match(/"(?:previous_close|closePrice)"\s*:\s*"?([^",}]+)"?/);
+        // Strategy 1: Look for __NEXT_DATA__ JSON
+        const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/);
+        if (nextDataMatch) {
+            try {
+                const data = JSON.parse(nextDataMatch[1]);
+                // Navigate to quote data: props.pageProps.quoteData
+                const quote = data.props?.pageProps?.quoteData;
+                if (quote) {
+                    return {
+                        price: parseFloat(quote.last) || 0,
+                        changePercent: parseFloat(quote.change_pct) || 0,
+                        open: parseFloat(quote.open) || 0,
+                        prevClose: parseFloat(quote.previous_close) || 0
+                    };
+                }
+            } catch (e) {}
+        }
+
+        // Strategy 2: Improved Regex for JSON fields anywhere
+        const price = parseFloat(html.match(/"price"\s*:\s*"([^"]+)"/)?.[1]?.replace(/,/g, '') || "0");
+        const changePct = parseFloat(html.match(/"priceChangePercent"\s*:\s*"([^"]+)"/)?.[1]?.replace(/,/g, '') || "0");
+        const open = parseFloat(html.match(/"open"\s*:\s*"([^"]+)"/)?.[1]?.replace(/,/g, '') || "0");
+        const prevClose = parseFloat(html.match(/"previous_close"\s*:\s*"([^"]+)"/)?.[1]?.replace(/,/g, '') || html.match(/"closePrice"\s*:\s*"?([^",}]+)"?/)?.[1]?.replace(/,/g, '') || "0");
         
-        const price = priceMatch ? parseFloat(priceMatch[1].replace(/,/g, '')) : 0;
-        const changePct = changePctMatch ? parseFloat(changePctMatch[1].replace(/,/g, '')) : 0;
-        const open = (openMatch && openMatch[1] !== '0.00') ? parseFloat(openMatch[1].replace(/,/g, '')) : 0;
-        const prevClose = prevCloseMatch ? parseFloat(prevCloseMatch[1].replace(/,/g, '')) : 0;
-        
-        return { price, changePercent: changePct, open, prevClose };
+        return { price, changePercent: changePct, open: open !== 0 ? open : 0, prevClose };
     } catch (e) {
         return { price: 0, changePercent: 0, open: 0, prevClose: 0 };
     }
@@ -167,20 +179,38 @@ export async function updateMarketMovers(maxToProcess: number = 20, force: boole
                     if (cnbcData?.open > 0) dayOpen = cnbcData.open;
                     else if (prevClose > 0) dayOpen = prevClose;
                     
-                    // Recalculate change percent if we have a real baseline
                     let changePerc = cnbcData?.changePercent || 0;
-                    if (prevClose > 0 && Math.abs(changePerc) < 0.0001) {
-                        changePerc = ((lastPrice - prevClose) / prevClose) * 100;
+
+                    // Preserve old data if we don't have it now
+                    const existing = await prisma.marketMover.findFirst({ where: { ticker } });
+
+                    let finalPrevClose = prevClose;
+                    if (finalPrevClose === 0 && (existing?.prevClose || 0) > 0) {
+                        finalPrevClose = existing!.prevClose!;
+                    } else if (finalPrevClose === 0) {
+                        finalPrevClose = lastPrice;
                     }
-                    
+
+                    let finalDayOpen = dayOpen;
+                    if (finalDayOpen === lastPrice && (existing?.dayOpen || 0) > 0) {
+                        finalDayOpen = existing!.dayOpen!;
+                    } else if (finalDayOpen === 0) {
+                        finalDayOpen = lastPrice;
+                    }
+
+                    // Recalculate change percent if we have a real baseline but change is 0
+                    if (Math.abs(changePerc) < 0.0001 && finalPrevClose > 0 && Math.abs(lastPrice - finalPrevClose) > 0.0001) {
+                        changePerc = ((lastPrice - finalPrevClose) / finalPrevClose) * 100;
+                    }
+
                     allTickersData.push({
                         ticker: ticker,
                         price: lastPrice,
                         changePerc: changePerc,
-                        prevClose: prevClose > 0 ? prevClose : lastPrice,
-                        dayOpen: dayOpen
+                        prevClose: finalPrevClose,
+                        dayOpen: finalDayOpen
                     });
-                    console.log(`[Market Service] Sync'd ${ticker}: $${lastPrice} (OCHG: ${((lastPrice - dayOpen) / dayOpen * 100).toFixed(2)}%)`);
+                    console.log(`[Market Service] Sync'd ${ticker}: $${lastPrice} (OCHG: ${((lastPrice - finalDayOpen) / finalDayOpen * 100).toFixed(2)}%)`);
                 } else {
                     allTickersData.push({
                         ticker: ticker,
@@ -253,12 +283,12 @@ export async function updateMarketMovers(maxToProcess: number = 20, force: boole
                 };
 
                 try {
-                    await tx.marketMover.deleteMany({
-                        where: { ticker: finalMover.ticker }
-                    });
-
-                    await tx.marketMover.create({
-                        data: finalMover
+                    await tx.marketMover.upsert({
+                        where: {
+                            ticker_type: { ticker: finalMover.ticker, type: finalMover.type }
+                        },
+                        update: finalMover,
+                        create: finalMover
                     });
                 } catch (upsertErr: any) {
                     console.error(`[Market Service] Transaction step failed for ${finalMover.ticker}:`, upsertErr.message);
