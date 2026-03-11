@@ -123,12 +123,19 @@ export async function updateMarketMovers(maxToProcess: number = 20, force: boole
         console.log(`[Market Service] Batch Sync: Processing ${pendingTickers.length} out of ${tickers.length} remaining tickers...`);
 
         const allTickersData: any[] = [];
+        // Efficiently fetch existing data for the whole batch
+        const existingMovers = await prisma.marketMover.findMany({
+            where: { ticker: { in: pendingTickers } }
+        });
+        const existingMap = new Map(existingMovers.map(m => [m.ticker, m]));
 
         console.log(`[Market Service] Using individual fetching for ${pendingTickers.length} tickers...`);
         for (const ticker of pendingTickers) {
             try {
                 const isCrypto = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE'].includes(ticker) || ticker.includes('-USD');
                 const normTicker = (isCrypto && !ticker.includes('-')) ? `${ticker}-USD` : ticker;
+
+                const existing = existingMap.get(ticker);
 
                 // 1. Get Prev Close (Stocks Only for now, Polygon Free Aggs for Crypto is tricky)
                 let prevClose = 0;
@@ -194,9 +201,6 @@ export async function updateMarketMovers(maxToProcess: number = 20, force: boole
                     
                     let changePerc = cnbcData?.changePercent || 0;
 
-                    // Preserve old data if we don't have it now
-                    const existing = await prisma.marketMover.findFirst({ where: { ticker } });
-
                     let finalPrevClose = prevClose;
                     if (finalPrevClose === 0 && (existing?.prevClose || 0) > 0) {
                         finalPrevClose = existing!.prevClose!;
@@ -231,7 +235,7 @@ export async function updateMarketMovers(maxToProcess: number = 20, force: boole
                 } else {
                     allTickersData.push({
                         ticker: ticker,
-                        isHeartbeat: true
+                        isHeartbeat: (existing?.price || 0) > 0
                     });
                 }
             } catch (e: any) {
@@ -262,18 +266,10 @@ export async function updateMarketMovers(maxToProcess: number = 20, force: boole
         await prisma.$transaction(async (tx) => {
             for (const t of allTickersData) {
                 if (t.isHeartbeat) {
-                    // Only touch updatedAt if they already have a valid price.
-                    // If price is 0, we WANT them to stay "stale" so they are retried immediately.
-                    const current = await tx.marketMover.findFirst({
-                        where: { ticker: t.ticker, price: { gt: 0 } }
+                    await tx.marketMover.updateMany({
+                        where: { ticker: t.ticker },
+                        data: { updatedAt: now }
                     });
-                    
-                    if (current) {
-                        await tx.marketMover.updateMany({
-                            where: { ticker: t.ticker },
-                            data: { updatedAt: now }
-                        });
-                    }
                     continue;
                 }
 
@@ -285,31 +281,25 @@ export async function updateMarketMovers(maxToProcess: number = 20, force: boole
                     changePercent: t.changePerc,
                     dayOpen: t.dayOpen,
                     prevClose: t.prevClose,
-                    // Priority Visibility: If common stock, force into ripper/dipper lists even if 0% change
                     type: isCommon 
                         ? (t.changePerc >= 0 ? 'day_ripper' : 'day_dipper')
                         : (t.changePerc > 0 ? 'day_ripper' : (t.changePerc < 0 ? 'day_dipper' : 'neutral')),
                     session: currentSession,
                     updatedAt: now,
-                };
-
-                const finalMover = {
-                    ...mover,
                     commonFlag: isCommon ? 1 : 0,
                     common_flag: isCommon ? 1 : 0
                 };
 
-                try {
-                    await tx.marketMover.upsert({
-                        where: {
-                            ticker_type: { ticker: finalMover.ticker, type: finalMover.type }
-                        },
-                        update: finalMover,
-                        create: finalMover
-                    });
-                } catch (upsertErr: any) {
-                    console.error(`[Market Service] Transaction step failed for ${finalMover.ticker}:`, upsertErr.message);
-                }
+                // REVERT TO DELETE/CREATE: This is the ONLY way to ensure only ONE record exists for a ticker 
+                // if it switches types (e.g. from 'neutral' to 'day_ripper').
+                // Upsert on 'ticker_type' would create a second record!
+                await tx.marketMover.deleteMany({
+                    where: { ticker: mover.ticker }
+                });
+
+                await tx.marketMover.create({
+                    data: mover
+                });
             }
         });
 
