@@ -15,6 +15,22 @@ export default function AdminLoginPage() {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    
+    // Debug tool for owner to test mailer
+    const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const isDebug = searchParams?.get('debug') === '1';
+    const [testResult, setTestResult] = useState('');
+
+    const runMailTest = async () => {
+        setTestResult('Sending...');
+        try {
+            const res = await fetch('/api/debug/test-mail?secret=jaswanth-secret-123');
+            const data = await res.json();
+            setTestResult(data.success ? 'Success! Check your inbox.' : `Failed: ${data.error}`);
+        } catch (e) {
+            setTestResult('Error: API not responding');
+        }
+    };
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -130,15 +146,28 @@ export default function AdminLoginPage() {
                         </button>
                     </form>
 
-                    <div className={s.adminSection}>
-                        <button
-                            type="button"
-                            className={s.adminButton}
-                            onClick={() => router.push('/register')}
-                        >
-                            Create Account
-                        </button>
-                    </div>
+                        {/* Debug tool */}
+                        {isDebug && (
+                            <div style={{ marginTop: '20px', padding: '15px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                                <p style={{ fontSize: '12px', color: '#64748b', margin: '0 10px 10px 0' }}>Mailer Diagnostic Tool</p>
+                                <button
+                                    onClick={runMailTest}
+                                    style={{ width: '100%', padding: '8px', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
+                                >
+                                    {testResult || 'Send Test Email to Owner'}
+                                </button>
+                            </div>
+                        )}
+
+                        <div className={s.adminSection}>
+                            <button
+                                type="button"
+                                className={s.adminButton}
+                                onClick={() => router.push('/register')}
+                            >
+                                Create Account
+                            </button>
+                        </div>
                 </div>
             </div>
         </div>

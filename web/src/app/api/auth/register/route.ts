@@ -52,13 +52,15 @@ export async function POST(req: NextRequest) {
             },
         });
 
-        // Step 2: Send approval email ONLY for admins
-        if (role === 'admin') {
+        // Step 2: Handle Approval/Email Logic
+        if (role === 'admin' || isOwner) {
             await prisma.$executeRaw`
                 UPDATE "User" 
                 SET "approvalToken" = ${approvalToken}
                 WHERE id = ${user.id}
             `;
+
+            console.log(`[REGISTER] Processing ${role} registration for ${email}. isOwner: ${isOwner}`);
 
             // Step 3: Send approval email to owner
             try {
@@ -68,10 +70,18 @@ export async function POST(req: NextRequest) {
                     email,
                     approvalToken,
                 });
-                console.log(`[REGISTER] Approval email sent for ${email}`);
+                console.log(`[REGISTER] Approval/Verification email sent for ${email}`);
             } catch (mailErr) {
-                console.error("[REGISTER] Failed to send approval email:", mailErr);
+                console.error("[REGISTER] Failed to send email:", mailErr);
             }
+
+            if (isOwner) {
+                return NextResponse.json(
+                    { message: "Owner account created and auto-approved.", approved: true },
+                    { status: 201 }
+                );
+            }
+
             return NextResponse.json(
                 {
                     message: "Registration successful. Awaiting admin approval.",
