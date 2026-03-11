@@ -32,7 +32,10 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
         // Check which ones need an update (older than 10 mins)
         const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000);
         const existingMovers = await prisma.marketMover.findMany({
-            where: { updatedAt: { gt: tenMinsAgo } },
+            where: { 
+                updatedAt: { gt: tenMinsAgo },
+                price: { gt: 0 } 
+            },
             select: { ticker: true }
         });
         const freshTickers = new Set(existingMovers.map(m => m.ticker));
