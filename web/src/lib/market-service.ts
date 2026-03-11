@@ -267,10 +267,12 @@ export async function updateMarketMovers(maxToProcess: number = 20, force: boole
                     });
                     console.log(`[Market Service] Sync'd ${ticker}: $${lastPrice} (OCHG: ${((lastPrice - finalDayOpen) / finalDayOpen * 100).toFixed(2)}%)`);
                 } else if (existing) {
-                    // It's a valid heartbeat (record exists, but we couldn't get a new price)
+                    // If it's an existing record but we still can't get a price,
+                    // we must ensure it doesn't have exactly '0' blocking the freshMovers check.
                     allTickersData.push({
                         ticker: ticker,
-                        isHeartbeat: true
+                        isHeartbeat: true,
+                        needsHealing: (existing.price === 0 || existing.dayOpen === 0 || existing.prevClose === 0)
                     });
                 } else {
                     // Initialize empty record to prevent infinite loop of "stale" un-synced tickers
@@ -310,9 +312,16 @@ export async function updateMarketMovers(maxToProcess: number = 20, force: boole
         await prisma.$transaction(async (tx) => {
             for (const t of allTickersData) {
                 if (t.isHeartbeat) {
+                    const updateData: any = { updatedAt: now };
+                    // Heal broken zero-value records retroactively so they stop blocking the queue
+                    if (t.needsHealing) {
+                        updateData.price = 0.0001;
+                        updateData.dayOpen = 0.0001;
+                        updateData.prevClose = 0.0001;
+                    }
                     await tx.marketMover.updateMany({
                         where: { ticker: t.ticker },
-                        data: { updatedAt: now }
+                        data: updateData
                     });
                     continue;
                 }
