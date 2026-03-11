@@ -232,12 +232,14 @@ export async function updateMarketMovers(maxToProcess: number = 20, force: boole
                         dayOpen: finalDayOpen
                     });
                     console.log(`[Market Service] Sync'd ${ticker}: $${lastPrice} (OCHG: ${((lastPrice - finalDayOpen) / finalDayOpen * 100).toFixed(2)}%)`);
-                } else {
+                } else if (existing) {
+                    // It's a valid heartbeat (record exists, but we couldn't get a new price)
                     allTickersData.push({
                         ticker: ticker,
-                        isHeartbeat: (existing?.price || 0) > 0
+                        isHeartbeat: true
                     });
                 }
+                // If price is 0 AND it doesn't exist, we skip it entirely to avoid Prisma errors.
             } catch (e: any) {
                 console.error(`[Market Service] Exception for ${ticker}:`, e.message);
             }
