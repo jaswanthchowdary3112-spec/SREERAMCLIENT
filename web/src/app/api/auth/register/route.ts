@@ -37,14 +37,18 @@ export async function POST(req: NextRequest) {
         const approvalToken = crypto.randomBytes(32).toString('hex');
         const displayName = name?.trim() || email.split("@")[0];
 
-        // Step 1: Create user with standard fields only (Prisma client may not yet know about new fields)
+        // Step 1: Create user
+        // AUTO-APPROVE if it's the site owner
+        const ownerEmail = "jaswanthvellanki11@gmail.com";
+        const isOwner = email === ownerEmail;
+
         const user = await prisma.user.create({
             data: {
                 name: displayName,
                 email,
                 password: hashedPassword,
-                role: role,
-                status: role === "admin" ? "pending" : "approved"
+                role: role === "admin" || isOwner ? (isOwner ? "owner" : "admin") : "user",
+                status: (role === "admin" && !isOwner) ? "pending" : "approved"
             },
         });
 
