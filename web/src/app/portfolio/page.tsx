@@ -47,64 +47,26 @@ export default function PortfolioPage() {
 
     const [mounted, setMounted] = useState(false);
 
-    // 1. Load Holdings from Server (CSV) or LocalStorage on Mount
+    // 1. Load Holdings from Server
     useEffect(() => {
         setMounted(true);
 
         const loadData = async () => {
-            let loaded = false;
-
             try {
-                // Try fetching from CSV via API
                 const res = await fetch('/api/portfolio');
                 if (res.ok) {
                     const serverData = await res.json();
-                    if (Array.isArray(serverData) && serverData.length > 0) {
+                    if (Array.isArray(serverData)) {
                         const mapped = serverData.map((h: any) => ({
                             ticker: h.ticker,
                             shares: h.shares,
                             avgPrice: h.avgCost || h.avgPrice || 0
                         }));
                         setHoldings(mapped);
-                        loaded = true;
                     }
                 }
             } catch (e) {
                 console.error("Failed to fetch portfolio from server:", e);
-            }
-
-            if (!loaded) {
-                // Fallback to LocalStorage
-                const saved = localStorage.getItem('userHoldings');
-                if (saved) {
-                    try {
-                        const parsed = JSON.parse(saved);
-                        if (Array.isArray(parsed) && parsed.length > 0) {
-                            setHoldings(parsed);
-                            loaded = true;
-                        }
-                    } catch (e) {
-                        console.error("Failed to parse holdings", e);
-                    }
-                }
-            }
-
-            // 3. Final Fallback: If still not loaded (server empty/failed AND localStorage empty), show defaults
-            if (!loaded) {
-                setHoldings([
-                    { ticker: 'NVDA', shares: 10, avgPrice: 850.00 },
-                    { ticker: 'TSLA', shares: 25, avgPrice: 195.00 },
-                    { ticker: 'AAPL', shares: 50, avgPrice: 175.00 },
-                    { ticker: 'AMD', shares: 40, avgPrice: 150.00 },
-                    { ticker: 'AMZN', shares: 20, avgPrice: 180.00 },
-                    { ticker: 'META', shares: 15, avgPrice: 310.25 },
-                    { ticker: 'NFLX', shares: 5, avgPrice: 420.00 },
-                    { ticker: 'GOOGL', shares: 18, avgPrice: 135.50 },
-                    { ticker: 'PLTR', shares: 100, avgPrice: 16.20 },
-                    { ticker: 'MSFT', shares: 12, avgPrice: 330.10 },
-                    { ticker: 'MARA', shares: 50, avgPrice: 12.50 },
-                    { ticker: 'COIN', shares: 15, avgPrice: 85.00 }
-                ]);
             }
         };
 
@@ -141,15 +103,8 @@ export default function PortfolioPage() {
         });
     }, [holdings, marketData.movers]);
 
-    // Save to localStorage whenever holdings change
-    useEffect(() => {
-        if (mounted) {
-            safeSetItem('userHoldings', holdings);
-        }
-    }, [holdings, mounted]);
-
     // Handlers
-    const handleAdd = (e: React.FormEvent) => {
+    const handleAdd = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newTicker || !newShares || !newPrice) return;
 
@@ -157,30 +112,54 @@ export default function PortfolioPage() {
         const shares = parseFloat(newShares);
         const avgPrice = parseFloat(newPrice);
 
-        const existingIdx = holdings.findIndex(h => h.ticker === ticker);
-        let newHoldings = [...holdings];
+        try {
+            const res = await fetch('/api/portfolio', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ticker, shares, avgCost: avgPrice })
+            });
 
-        if (existingIdx >= 0) {
-            const h = newHoldings[existingIdx];
-            const totalCost = (h.shares * h.avgPrice) + (shares * avgPrice);
-            const totalShares = h.shares + shares;
-            newHoldings[existingIdx] = {
-                ticker,
-                shares: totalShares,
-                avgPrice: totalCost / totalShares
-            };
-        } else {
-            newHoldings.push({ ticker, shares, avgPrice });
+            if (res.ok) {
+                const existingIdx = holdings.findIndex(h => h.ticker === ticker);
+                let newHoldings = [...holdings];
+
+                if (existingIdx >= 0) {
+                    const h = newHoldings[existingIdx];
+                    const totalCost = (h.shares * h.avgPrice) + (shares * avgPrice);
+                    const totalShares = h.shares + shares;
+                    newHoldings[existingIdx] = {
+                        ticker,
+                        shares: totalShares,
+                        avgPrice: totalCost / totalShares
+                    };
+                } else {
+                    newHoldings.push({ ticker, shares, avgPrice });
+                }
+
+                setHoldings(newHoldings);
+                setNewTicker('');
+                setNewShares('');
+                setNewPrice('');
+            }
+        } catch (e) {
+            console.error("Failed to add to portfolio:", e);
         }
-
-        setHoldings(newHoldings);
-        setNewTicker('');
-        setNewShares('');
-        setNewPrice('');
     };
 
-    const handleRemove = (ticker: string) => {
-        setHoldings(holdings.filter(h => h.ticker !== ticker));
+    const handleRemove = async (ticker: string) => {
+        try {
+            const res = await fetch('/api/portfolio', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ticker })
+            });
+
+            if (res.ok) {
+                setHoldings(holdings.filter(h => h.ticker !== ticker));
+            }
+        } catch (e) {
+            console.error("Failed to remove from portfolio:", e);
+        }
     };
 
     const totalValue = portfolioData.reduce((sum, i) => sum + i.value, 0);

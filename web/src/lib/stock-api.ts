@@ -53,11 +53,11 @@ async function fetchLiveQuotesInternal(tickers: string[]): Promise<Record<string
 
         // --- 1. PRE-FETCH FROM DATABASE (Save Quota) ---
         if (tickers.length > 0) {
-            const twoHoursAgo = new Date(Date.now() - 120 * 60 * 1000);
+            const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
             const dbMovers = await prisma.marketMover.findMany({
                 where: {
                     ticker: { in: tickers },
-                    updatedAt: { gt: twoHoursAgo }
+                    updatedAt: { gt: twentyFourHoursAgo }
                 }
             });
 
@@ -479,6 +479,9 @@ export async function getCSVPortfolioHoldings(): Promise<any[]> {
 
     try {
         // Primary Source: Prisma PortfolioHolding table
+        // We look for holdings for the currently authenticated user if possible, 
+        // but here we just return ALL if used globally (legacy).
+        // NEW: If DB is empty, we return empty list, NOT the CSV defaults.
         const dbHoldings = await prisma.portfolioHolding.findMany();
 
         if (dbHoldings.length > 0) {
@@ -495,13 +498,8 @@ export async function getCSVPortfolioHoldings(): Promise<any[]> {
             return result;
         }
 
-        // Fallback: CSV
-        const csvPaths = [
-            path.join(process.cwd(), '../portfolio.csv'),
-            path.join(process.cwd(), 'public/portfolio.csv'),
-            path.join(process.cwd(), 'portfolio.csv'),
-            path.join(process.cwd(), '.next/server/public/portfolio.csv')
-        ];
+        // Removed fallback to CSV to prevent "resurrecting" deleted items
+        return [];
 
         let csvPath = null;
         for (const p of csvPaths) {
