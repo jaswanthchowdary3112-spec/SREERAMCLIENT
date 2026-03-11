@@ -74,33 +74,35 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
                     break;
                 }
 
-                if (prevRes.ok && tradeRes.ok) {
+                if (prevRes.ok) {
                     const prevData = await prevRes.json();
-                    const tradeData = await tradeRes.json();
-
                     const prevClose = prevData.results?.[0]?.c || 0;
-                    const lastPrice = tradeData.last?.price || tradeData.last?.p || prevClose;
 
-                    const changePerc = prevClose > 0 ? ((lastPrice - prevClose) / prevClose) * 100 : 0;
+                    let lastPrice = 0;
+                    if (tradeRes.ok) {
+                        const tradeData = await tradeRes.json();
+                        lastPrice = tradeData.last?.price || tradeData.last?.p || 0;
+                    }
 
-                    allTickersData.push({
-                        ticker: ticker,
-                        lastTrade: { p: lastPrice, t: Date.now() },
-                        todaysChangePerc: changePerc,
-                        day: { o: prevClose },
-                        prevDay: { c: prevClose }
-                    });
-                    console.log(`[Market Service] Sync'd ${ticker}: $${lastPrice} (${changePerc.toFixed(2)}%)`);
+                    // Fallback to previous close if current price is missing
+                    if (lastPrice === 0) lastPrice = prevClose;
+
+                    if (lastPrice > 0) {
+                        const changePerc = prevClose > 0 ? ((lastPrice - prevClose) / prevClose) * 100 : 0;
+
+                        allTickersData.push({
+                            ticker: ticker,
+                            lastTrade: { p: lastPrice, t: Date.now() },
+                            todaysChangePerc: changePerc,
+                            day: { o: prevClose },
+                            prevDay: { c: prevClose }
+                        });
+                        console.log(`[Market Service] Sync'd ${ticker}: $${lastPrice} (${changePerc.toFixed(2)}%)`);
+                    } else {
+                        console.warn(`[Market Service] ${ticker} skipped: No price found anywhere.`);
+                    }
                 } else {
-                    // Mark as updated even if failed so we move to next tickers
-                    allTickersData.push({
-                        ticker: ticker,
-                        lastTrade: { p: 0, t: Date.now() },
-                        todaysChangePerc: 0,
-                        day: { o: 0 },
-                        prevDay: { c: 0 }
-                    });
-                    console.warn(`[Market Service] ${ticker} failed (Status: ${prevRes.status}/${tradeRes.status}). Marked to skip for next 10 mins.`);
+                    console.warn(`[Market Service] ${ticker} failed: Prev Agg status ${prevRes.status}`);
                 }
             } catch (e: any) {
                 console.error(`[Market Service] Exception for ${ticker}:`, e.message);
