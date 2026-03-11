@@ -3,6 +3,31 @@ import { prisma } from './prisma';
 const POLYGON_API_KEY = process.env.POLYGON_API_KEY || process.env.API_KEY;
 const BASE_URL = 'https://api.polygon.io';
 
+async function scrapeCNBC(ticker: string): Promise<{ price: number, changePercent: number }> {
+    try {
+        const isCrypto = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE'].includes(ticker.toUpperCase()) || ticker.includes('-USD');
+        let url = `https://www.cnbc.com/quotes/${ticker}`;
+        if (ticker.toUpperCase() === 'BTC' || ticker.toUpperCase() === 'BTC-USD') url = "https://www.cnbc.com/quotes/BTC.CM=";
+        if (ticker.toUpperCase() === 'ETH' || ticker.toUpperCase() === 'ETH-USD') url = "https://www.cnbc.com/quotes/ETH.CM=";
+
+        const res = await fetch(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+            next: { revalidate: 60 }
+        });
+        if (!res.ok) return { price: 0, changePercent: 0 };
+        const html = await res.text();
+        const priceMatch = html.match(/"price"\s*:\s*"([^"]+)"/);
+        const changePctMatch = html.match(/"priceChangePercent"\s*:\s*"([^"]+)"/);
+        
+        let price = priceMatch ? parseFloat(priceMatch[1].replace(/,/g, '')) : 0;
+        let changePct = changePctMatch ? parseFloat(changePctMatch[1].replace(/,/g, '')) : 0;
+        
+        return { price, changePercent: changePct };
+    } catch (e) {
+        return { price: 0, changePercent: 0 };
+    }
+}
+
 export async function updateMarketMovers(maxToProcess: number = 20) {
     if (!POLYGON_API_KEY) {
         console.error('[Market Service] No API_KEY found');
@@ -87,47 +112,57 @@ export async function updateMarketMovers(maxToProcess: number = 20) {
                 if (isCrypto) {
                     const [base, quote] = normTicker.split('-');
                     const tradeUrl = `${BASE_URL}/v1/last/crypto/${base}/${quote}?apiKey=${POLYGON_API_KEY}`;
-                    tradeRes = await fetch(tradeUrl);
-                    if (tradeRes.ok) {
-                        const tradeData = await tradeRes.json();
-                        lastPrice = tradeData.last?.price || 0;
-                        if (prevClose === 0) prevClose = lastPrice; // Crypto fallback
-                    }
+                    try {
+                        tradeRes = await fetch(tradeUrl);
+                        if (tradeRes.ok) {
+                            const tradeData = await tradeRes.json();
+                            lastPrice = tradeData.last?.price || 0;
+                            if (prevClose === 0) prevClose = lastPrice;
+                        }
+                    } catch (e) {}
                 } else {
                     const tradeUrl = `${BASE_URL}/v1/last/stocks/${normTicker}?apiKey=${POLYGON_API_KEY}`;
-                    tradeRes = await fetch(tradeUrl);
-                    if (tradeRes.ok) {
-                        const tradeData = await tradeRes.json();
-                        lastPrice = tradeData.last?.price || tradeData.last?.p || 0;
+                    try {
+                        tradeRes = await fetch(tradeUrl);
+                        if (tradeRes.ok) {
+                            const tradeData = await tradeRes.json();
+                            lastPrice = tradeData.last?.price || tradeData.last?.p || 0;
+                        }
+                    } catch (e) {}
+                }
+
+                // --- CNBC FALLBACK (RESILIENCY UPGRADE) ---
+                if (lastPrice === 0 || tradeRes?.status === 403 || tradeRes?.status === 429) {
+                    console.log(`[Market Service] Polygon failed/limited for ${ticker}. Trying CNBC...`);
+                    const cnbcData = await scrapeCNBC(ticker);
+                    if (cnbcData.price > 0) {
+                        lastPrice = cnbcData.price;
+                        if (prevClose === 0) prevClose = lastPrice / (1 + (cnbcData.changePercent / 100));
+                        console.log(`[Market Service] CNBC Rescue for ${ticker}: $${lastPrice}`);
                     }
                 }
 
-                if (tradeRes?.status === 429) {
-                    console.warn(`[Market Service] Rate limit (429) hit at ${ticker}. Stopping batch.`);
+                if (tradeRes?.status === 429 && lastPrice === 0) {
+                    console.warn(`[Market Service] Pure Rate limit (429) hit. Stopping batch.`);
                     break;
                 }
 
                 // ONLY UPDATE IF WE FOUND A REAL PRICE (> 0)
                 if (lastPrice > 0) {
-                    // Calculate change ONLY if we have a valid prevClose that isn't the same as lastPrice
-                    // If we don't have a valid prevClose, we keep the price but 0% change
                     const changePerc = (prevClose > 0 && prevClose !== lastPrice) ? ((lastPrice - prevClose) / prevClose) * 100 : 0;
                     
                     allTickersData.push({
-                        ticker: ticker, // Keep original ticker for DB lookup
+                        ticker: ticker,
                         price: lastPrice,
                         changePerc: changePerc,
                         prevClose: prevClose > 0 ? prevClose : lastPrice,
                         dayOpen: prevClose > 0 ? prevClose : lastPrice
                     });
-                    console.log(`[Market Service] Sync'd ${ticker}: $${lastPrice} (${changePerc.toFixed(2)}%)`);
                 } else {
-                    // Even if we skip the data update, we create a "heartbeat" to move the sync forward
                     allTickersData.push({
                         ticker: ticker,
                         isHeartbeat: true
                     });
-                    console.warn(`[Market Service] ${ticker} no price data found. Skipping but touching heartbeat.`);
                 }
             } catch (e: any) {
                 console.error(`[Market Service] Exception for ${ticker}:`, e.message);
