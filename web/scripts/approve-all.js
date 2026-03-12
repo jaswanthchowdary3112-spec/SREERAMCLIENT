@@ -1,38 +1,29 @@
+require('dotenv').config();
 const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const p = new PrismaClient();
 
-async function approveAll() {
-    try {
-        console.log('Searching for pending users...');
-        const pendingUsers = await prisma.user.findMany({
-            where: { status: 'pending' }
+async function m() {
+  try {
+    const res = await p.user.updateMany({
+        where: { status: 'pending' },
+        data: { status: 'approved' }
+    });
+    console.log(`Approved ${res.count} users.`);
+    
+    // Also ensure jaswanthvellanki11@gmail.com is an owner if they exist
+    const ownerEmail = "jaswanthvellanki11@gmail.com";
+    const u = await p.user.findUnique({ where: { email: ownerEmail } });
+    if (u) {
+        await p.user.update({
+            where: { email: ownerEmail },
+            data: { role: 'owner', status: 'approved' }
         });
-
-        if (pendingUsers.length === 0) {
-            console.log('No pending users found.');
-            return;
-        }
-
-        console.log(`Found ${pendingUsers.length} pending users. Approving...`);
-
-        const result = await prisma.user.updateMany({
-            where: { status: 'pending' },
-            data: {
-                status: 'approved',
-                role: 'owner', // Granting owner access as requested
-                approvalToken: null
-            }
-        });
-
-        console.log(`✅ Success! ${result.count} users have been approved.`);
-        console.log('Emails of approved users:');
-        pendingUsers.forEach(u => console.log(` - ${u.email}`));
-
-    } catch (error) {
-        console.error('❌ Error approving users:', error);
-    } finally {
-        await prisma.$disconnect();
+        console.log(`Ensured ${ownerEmail} is approved owner.`);
     }
+  } catch (e) {
+    console.error(e);
+  } finally {
+    await p.$disconnect();
+  }
 }
-
-approveAll();
+m();

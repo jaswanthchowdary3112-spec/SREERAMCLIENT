@@ -1,40 +1,35 @@
-require('dotenv').config({ path: './.env' });
+require('dotenv').config();
 const nodemailer = require('nodemailer');
 
-console.log('EMAIL_USER:', process.env.EMAIL_USER);
-console.log('EMAIL_PASS:', process.env.EMAIL_PASS ? '***set***' : 'NOT SET');
-
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-    },
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
 });
 
-async function test() {
-    try {
-        // First verify connection
-        console.log('\nVerifying Gmail connection...');
-        await transporter.verify();
-        console.log('✅ Gmail connection OK!');
+async function testEmail() {
+  console.log('Using EMAIL_USER:', process.env.EMAIL_USER);
+  console.log('Using EMAIL_PASS:', process.env.EMAIL_PASS ? '********' : 'NOT SET');
 
-        // Send test email
-        console.log('\nSending test email...');
-        const info = await transporter.sendMail({
-            from: `"StockTrack Test" <${process.env.EMAIL_USER}>`,
-            to: 'jaswanthvellanki11@gmail.com',
-            subject: '✅ StockTrack Email Test',
-            html: '<h2>Email is working!</h2><p>This is a test from StockTrack admin approval system.</p>',
-        });
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.error('Environment variables missing!');
+      return;
+  }
 
-        console.log('✅ Email sent! Message ID:', info.messageId);
-    } catch (err) {
-        console.error('\n❌ ERROR DETAILS:');
-        console.error('Code:', err.code);
-        console.error('Message:', err.message);
-        if (err.response) console.error('Server Response:', err.response);
-    }
+  try {
+    const info = await transporter.sendMail({
+      from: `"Test System" <${process.env.EMAIL_USER}>`,
+      to: 'jaswanthvellanki11@gmail.com',
+      subject: 'Test Email from StockTrack',
+      text: 'If you receive this, your SMTP settings are working correctly.',
+      html: '<b>If you receive this, your SMTP settings are working correctly.</b>',
+    });
+    console.log('Email sent: ' + info.response);
+  } catch (error) {
+    console.error('Error sending email:', error);
+  }
 }
 
-test();
+testEmail();

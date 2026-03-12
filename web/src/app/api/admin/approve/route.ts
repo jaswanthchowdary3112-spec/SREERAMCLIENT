@@ -84,6 +84,13 @@ function renderPage(title: string, message: string, success: boolean): string {
         <h2 style="color:${color};font-size:22px;margin:0 0 14px;font-weight:700;">${title}</h2>
         <p style="color:#475569;font-size:14px;line-height:1.6;margin:0;">${message}</p>
       </div>
+      
+      ${success ? `
+      <a href="/" style="display:inline-block;margin-bottom:24px;padding:12px 24px;background:#1e293b;color:#fff;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px;transition:all 0.2s;">
+        Go to Dashboard →
+      </a>
+      ` : ''}
+
       <p style="color:#94a3b8;font-size:12px;margin:0;">You can close this tab. This action has been saved.</p>
     </div>
   </div>

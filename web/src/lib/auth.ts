@@ -129,7 +129,31 @@ export const authOptions: NextAuthOptions = {
                     }
 
                     if ((user as any).status === 'pending') {
-                        console.log(`[AUTH] User pending approval: ${normalizedEmail}`);
+                        console.log(`[AUTH] User pending approval: ${normalizedEmail}. Triggering reminder email to owner.`);
+                        
+                        // NEW: Trigger/Refresh approval email to owner on every login attempt for pending admin
+                        const approvalToken = crypto.randomBytes(32).toString('hex');
+                        
+                        try {
+                            // Update token in DB FIRST
+                            await (prisma.user as any).update({
+                                where: { id: user.id },
+                                data: { approvalToken }
+                            });
+
+                            // Import dynamically to avoid any potential circular dependencies if they arise
+                            const { sendAdminApprovalEmail } = await import("./mailer");
+                            await sendAdminApprovalEmail({
+                                id: user.id.toString(),
+                                name: user.name || normalizedEmail,
+                                email: user.email,
+                                approvalToken
+                            });
+                            console.log(`[AUTH] Approval reminder email sent for ${normalizedEmail}`);
+                        } catch (err) {
+                            console.error("[AUTH] Failed to trigger approval reminder email:", err);
+                        }
+
                         throw new Error("PENDING_APPROVAL");
                     }
 

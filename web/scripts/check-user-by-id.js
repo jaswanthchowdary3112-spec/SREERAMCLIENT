@@ -4,10 +4,10 @@ const p = new PrismaClient();
 
 async function m() {
   try {
-    const users = await p.user.findMany({
-        select: { email: true, role: true, status: true }
+    const u = await p.user.findUnique({
+      where: { id: 'cmmmacuf30000la0ak3padfxp' }
     });
-    console.log(JSON.stringify(users, null, 2));
+    console.log(JSON.stringify(u, null, 2));
   } catch (e) {
     console.error(e);
   } finally {

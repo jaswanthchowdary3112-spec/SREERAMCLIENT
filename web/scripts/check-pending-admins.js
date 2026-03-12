@@ -5,9 +5,10 @@ const p = new PrismaClient();
 async function m() {
   try {
     const users = await p.user.findMany({
-        select: { email: true, role: true, status: true }
+        where: { role: 'admin', status: 'pending' },
+        select: { email: true, createdAt: true }
     });
-    console.log(JSON.stringify(users, null, 2));
+    console.log("Pending Admins:", JSON.stringify(users, null, 2));
   } catch (e) {
     console.error(e);
   } finally {
