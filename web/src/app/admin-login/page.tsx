@@ -15,7 +15,7 @@ export default function AdminLoginPage() {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-    
+
     // --- Pending Approval State ---
     const [isPending, setIsPending] = useState(false);
     const [isApproved, setIsApproved] = useState(false);
@@ -88,7 +88,7 @@ export default function AdminLoginPage() {
                     if (data.status === 'approved') {
                         setIsApproved(true);
                         clearInterval(interval);
-                        
+
                         // Wait 2s for visual feedback then attempt final login (if password available) or just refresh
                         setTimeout(async () => {
                             if (password) {
@@ -105,7 +105,7 @@ export default function AdminLoginPage() {
                 } catch (e) {
                     console.error("Polling error:", e);
                 }
-            }, 5000);
+            }, 2000);
             return () => clearInterval(interval);
         }
     }, [isPending, pendingEmail, isApproved, password]);
@@ -160,8 +160,8 @@ export default function AdminLoginPage() {
                                     <>Your account has been approved!<br />Redirecting you to the dashboard...</>
                                 ) : (
                                     <>Account <strong>{pendingEmail}</strong> is awaiting approval.<br />
-                                    An approval request is pending from the system owner.<br />
-                                    You will be redirected automatically once approved.</>
+                                        An approval request is pending from the system owner.<br />
+                                        You will be redirected automatically once approved.</>
                                 )}
                             </p>
 
@@ -297,28 +297,28 @@ export default function AdminLoginPage() {
                         </button>
                     </form>
 
-                        {/* Debug tool */}
-                        {isDebug && (
-                            <div style={{ marginTop: '20px', padding: '15px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                                <p style={{ fontSize: '12px', color: '#64748b', margin: '0 10px 10px 0' }}>Mailer Diagnostic Tool</p>
-                                <button
-                                    onClick={runMailTest}
-                                    style={{ width: '100%', padding: '8px', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
-                                >
-                                    {testResult || 'Send Test Email to Owner'}
-                                </button>
-                            </div>
-                        )}
-
-                        <div className={s.adminSection}>
+                    {/* Debug tool */}
+                    {isDebug && (
+                        <div style={{ marginTop: '20px', padding: '15px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                            <p style={{ fontSize: '12px', color: '#64748b', margin: '0 10px 10px 0' }}>Mailer Diagnostic Tool</p>
                             <button
-                                type="button"
-                                className={s.adminButton}
-                                onClick={() => router.push('/register')}
+                                onClick={runMailTest}
+                                style={{ width: '100%', padding: '8px', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
                             >
-                                Create Account
+                                {testResult || 'Send Test Email to Owner'}
                             </button>
                         </div>
+                    )}
+
+                    <div className={s.adminSection}>
+                        <button
+                            type="button"
+                            className={s.adminButton}
+                            onClick={() => router.push('/register')}
+                        >
+                            Create Account
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

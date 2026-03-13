@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
             where: { id: user.id },
             data: {
                 status: 'approved',
-                role: 'owner',
+                role: 'admin',
                 approvalToken: null, // Consume the token
             },
         });
@@ -85,11 +85,10 @@ function renderPage(title: string, message: string, success: boolean): string {
         <p style="color:#475569;font-size:14px;line-height:1.6;margin:0;">${message}</p>
       </div>
       
-      ${success ? `
-      <a href="/" style="display:inline-block;margin-bottom:24px;padding:12px 24px;background:#1e293b;color:#fff;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px;transition:all 0.2s;">
-        Go to Dashboard →
-      </a>
-      ` : ''}
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 20px;margin-bottom:24px;display:inline-flex;align-items:center;gap:10px;">
+        <span style="font-size:16px;">✨</span>
+        <span style="color:#16a34a;font-size:13px;font-weight:600;">Success</span>
+      </div>
 
       <p style="color:#94a3b8;font-size:12px;margin:0;">You can close this tab. This action has been saved.</p>
     </div>
